@@ -1,0 +1,18 @@
+{
+  "image_path": null,
+  "tesseract_cmd": "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+  "hp_region": [110, 960, 240, 60],
+  "energy_region": [940, 860, 140, 120],
+  "event_region": [420, 180, 1080, 220],
+  "hand_regions": [
+    [300, 830, 180, 70],
+    [470, 810, 180, 70],
+    [640, 795, 180, 70],
+    [810, 790, 180, 70],
+    [980, 795, 180, 70],
+    [1150, 810, 180, 70],
+    [1320, 830, 180, 70]
+  ],
+  "event_keywords": ["event", "leave", "accept", "decline", "skip"]
+}
+

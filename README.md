@@ -1,2 +1,174 @@
 # Slayer-of-Spire-2
+
 a bot that should play Slay the Spire 2 better than me
+
+## Interface Layer (MVP)
+
+This repository now includes a runnable interface layer:
+
+- Real-time state polling (`MockReader` now, `MemoryReader` ready)
+- Unified state/action contracts
+- FastAPI service for state, suggestions, and action submission
+- Action sink logger (`runtime/actions.log`) as a safe placeholder
+
+Detailed architecture and reading principles are documented in `docs/reading-and-interface.md`.
+Mod push protocol is documented in `docs/mod-ingest-interface.md`.
+
+## Quick Start (Windows PowerShell)
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+Run API with mock reader:
+
+```powershell
+sos2-interface --reader mock --host 127.0.0.1 --port 8765
+```
+
+Watch state polling in another terminal:
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+.\.venv\Scripts\Activate.ps1
+python tools\watch_state.py --reader mock --count 5 --interval-ms 300
+```
+
+Memory mode (after filling addresses):
+
+```powershell
+sos2-interface --reader memory --memory-map config\memory_map.example.json
+```
+
+Tip: prefer `hp_candidates` / `energy_candidates` arrays in the memory map so the reader can auto-fallback when one address becomes invalid.
+
+Screen mode (OCR on fixed UI regions):
+
+```powershell
+sos2-interface --reader screen --screen-map config\screen_map.example.json
+```
+
+Hybrid mode (recommended: memory first, screen fallback):
+
+```powershell
+sos2-interface --reader hybrid --memory-map config\memory_map.example.json --screen-map config\screen_map.example.json
+```
+
+Mod ingest mode (recommended for official mod bridge):
+
+```powershell
+sos2-interface --reader mod --host 127.0.0.1 --port 8765
+```
+
+MCP API mode (pull directly from STS2MCP localhost API, includes non-combat screens in `raw_state`):
+
+```powershell
+sos2-interface --reader mcp-api --mcp-host 127.0.0.1 --mcp-port 15526 --mcp-mode singleplayer
+```
+
+You can also load endpoint settings from config:
+
+```powershell
+sos2-interface --reader mcp-api --mcp-config config\mcp_api.example.json
+```
+
+Optional ingest token:
+
+```powershell
+$env:SOS2_INGEST_TOKEN = "your-local-token"
+sos2-interface --reader mod --host 127.0.0.1 --port 8765
+```
+
+Watch MCP data while playing (prints transitions and writes JSONL to `runtime/mcp_debug.jsonl`):
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\debug_mcp_state.py --mcp-config config\mcp_api.example.json --interval-ms 200
+```
+
+Deterministic-segment planner loop (plan -> execute -> reobserve):
+
+```powershell
+sos2-planner --reader hybrid --memory-map config\memory_map.example.json --screen-map config\screen_map.example.json --iterations 10 --max-segment-actions 6 --max-branches 4000
+```
+
+Richer per-action combat logs (pre/post snapshots and transition deltas):
+
+```powershell
+sos2-planner --reader mcp-api --mcp-config config\mcp_api.example.json --iterations 50 --executor dry-run --capture-action-trace --action-trace-file runtime\planner_action_trace.jsonl
+```
+
+Optional live self-play execution through STS2MCP POST API (safety-gated):
+
+```powershell
+sos2-planner --reader mcp-api --mcp-config config\mcp_api.example.json --iterations 200 --executor mcp-post --enable-live-actions --capture-action-trace --trace-raw-state
+```
+
+When live execution is disabled, `mcp-post` refuses actions and returns `accepted=false`.
+
+Build training dataset and train a first action-value model from action traces:
+
+```powershell
+python tools\build_action_dataset.py --input runtime\planner_action_trace.jsonl --output runtime\action_value_dataset.jsonl --gamma 0.95
+python tools\train_action_value_model.py --dataset runtime\action_value_dataset.jsonl --out runtime\action_value_model.json --epochs 8 --lr 0.03 --target return
+python tools\score_action_trace.py --model runtime\action_value_model.json --trace runtime\planner_action_trace.jsonl --count 10
+```
+
+Use the trained model in planner search:
+
+```powershell
+sos2-planner --reader mcp-api --mcp-config config\mcp_api.example.json --executor dry-run --value-model runtime\action_value_model.json --value-model-weight 0.35 --capture-action-trace
+```
+
+`mcp-post` now supports raw API operation coverage for combat and non-combat screens, including rewards, map, rest, shop, event choices, card/relic selection overlays, treasure claim, dialogue advance, and multiplayer `undo_end_turn`.
+
+The planner now performs bounded branch search from current hand and scores each branch using:
+
+- damage dealt
+- block gained
+- utility effects (draw/energy/status gains)
+- end-turn decision bonus
+- projected incoming damage from enemy intents (penalty)
+
+Then it selects the highest-score branch and executes that segment.
+
+Local card knowledge file (manual updates):
+
+- Default path: `config/card_knowledge.local.json`
+- You can add/update card costs and random-boundary card IDs without code changes.
+- File changes are hot-reloaded automatically by the planner loop.
+
+Validate your local card file after manual edits:
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\validate_card_knowledge.py --file config\card_knowledge.local.json
+```
+
+Build full card mapping (offline, from local parsed card JSON):
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\build_card_knowledge_from_codex.py --cards-glob "E:\path\to\spire-codex\data\eng\cards*.json" --out config\card_knowledge.local.json
+python tools\validate_card_knowledge.py --file config\card_knowledge.local.json
+```
+
+Generate OCR regions interactively (manual rectangle picker):
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\pick_screen_regions.py --screen-map config\screen_map.example.json
+```
+
+Controls in picker window:
+
+- drag left mouse to draw current element
+- `n` skip current element
+- `u` undo last region
+- `s` save to `screen_map` and exit
+
+`ScreenReader` now supports `hand_regions` in `config\screen_map.example.json`.
+After configuring ROIs, `/state` will return normalized `player.hand` card IDs mapped from OCR text via `aliases`.

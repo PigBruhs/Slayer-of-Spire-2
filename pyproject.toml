@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sos2-interface"
+version = "0.1.0"
+description = "Slay the Spire 2 interface layer for real-time state reading and action output"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0",
+  "numpy>=2.2.0",
+  "opencv-python-headless>=4.10.0.84",
+  "Pillow>=11.0.0",
+  "pydantic>=2.11.0",
+  "psutil>=7.0.0",
+  "pytesseract>=0.3.13",
+  "uvicorn>=0.35.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+sos2-interface = "sos2_interface.main:main"
+sos2-planner = "sos2_interface.planner_main:main"
+

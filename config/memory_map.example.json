@@ -1,0 +1,13 @@
+{
+  "process_name": "SlayTheSpire2.exe",
+  "hp_candidates": [
+    "0x1F4F5D5AB08",
+    "0x1F4F9045F6C",
+    "0x1F4FDC24480"
+  ],
+  "max_hp_candidates": [],
+  "energy_candidates": [
+    "0x1F4FDC4C9B8"
+  ]
+}
+

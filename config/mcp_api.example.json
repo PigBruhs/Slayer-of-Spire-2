@@ -1,0 +1,7 @@
+{
+  "host": "127.0.0.1",
+  "port": 15526,
+  "mode": "singleplayer",
+  "timeout_seconds": 2.0
+}
+
