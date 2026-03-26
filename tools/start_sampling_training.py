@@ -464,12 +464,25 @@ class DualRLAgent:
             slot = potion.get("slot")
             if not isinstance(slot, int):
                 continue
+
+            can_use_in_combat = potion.get("can_use_in_combat")
+            if isinstance(can_use_in_combat, bool) and not can_use_in_combat:
+                continue
+
+            usage = str(potion.get("usage") or "").strip().lower()
+            if usage in {"automatic", "auto"}:
+                continue
+
+            potion_id = str(potion.get("id") or potion.get("potion_id") or "")
             target_type = str(potion.get("target_type") or "").lower()
+            metadata: dict[str, str | int | float | bool] = {"slot": slot, "target_type": target_type}
+            if potion_id:
+                metadata["potion_id"] = potion_id
             if "enemy" in target_type and targets:
                 for target_id in targets:
-                    actions.append(ActionCommand(action_type="use_potion", option_index=slot, target_id=target_id, metadata={"slot": slot}))
+                    actions.append(ActionCommand(action_type="use_potion", option_index=slot, target_id=target_id, metadata=metadata.copy()))
             else:
-                actions.append(ActionCommand(action_type="use_potion", option_index=slot, metadata={"slot": slot}))
+                actions.append(ActionCommand(action_type="use_potion", option_index=slot, metadata=metadata))
 
         # Only offer end_turn when no other actionable combat moves are available.
         has_non_end_action = any(a.action_type in {"play_card", "use_potion"} for a in actions)
@@ -503,9 +516,20 @@ class DualRLAgent:
             if bool(section.get("in_dialogue")):
                 actions.append(ActionCommand(action_type="advance_dialogue"))
             options = section.get("options") if isinstance(section.get("options"), list) else []
+            unlocked_index = 0
             for item in options:
                 if isinstance(item, dict) and isinstance(item.get("index"), int) and not bool(item.get("is_locked", False)):
-                    actions.append(ActionCommand(action_type="event_choose", option_index=int(item["index"])))
+                    actions.append(
+                        ActionCommand(
+                            action_type="event_choose",
+                            option_index=unlocked_index,
+                            metadata={
+                                "event_option_raw_index": int(item["index"]),
+                                "event_option_title": str(item.get("title") or ""),
+                            },
+                        )
+                    )
+                    unlocked_index += 1
 
         elif state_type == "map":
             section = raw.get("map") if isinstance(raw.get("map"), dict) else {}
@@ -517,9 +541,20 @@ class DualRLAgent:
         elif state_type == "rest_site":
             section = raw.get("rest_site") if isinstance(raw.get("rest_site"), dict) else {}
             options = section.get("options") if isinstance(section.get("options"), list) else []
+            enabled_index = 0
             for item in options:
                 if isinstance(item, dict) and isinstance(item.get("index"), int) and bool(item.get("is_enabled", False)):
-                    actions.append(ActionCommand(action_type="choose_rest_option", option_index=int(item["index"])))
+                    actions.append(
+                        ActionCommand(
+                            action_type="choose_rest_option",
+                            option_index=enabled_index,
+                            metadata={
+                                "rest_option_raw_index": int(item["index"]),
+                                "rest_option_id": str(item.get("id") or ""),
+                            },
+                        )
+                    )
+                    enabled_index += 1
             if bool(section.get("can_proceed")):
                 actions.append(ActionCommand(action_type="proceed"))
 
@@ -610,12 +645,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--noncombat-model", default="runtime/noncombat_policy_model.json")
     parser.add_argument("--retrain-every", type=int, default=5)
     parser.add_argument("--train-epochs", type=int, default=10)
-    parser.add_argument("--combat-train-every-combat", action="store_true", default=True)
+    parser.add_argument("--combat-train-every-combat", action="store_true", default=False)
     parser.add_argument("--no-combat-train-every-combat", action="store_false", dest="combat_train_every_combat")
     parser.add_argument("--global-train-every-episode", action="store_true", default=True)
     parser.add_argument("--no-global-train-every-episode", action="store_false", dest="global_train_every_episode")
     parser.add_argument("--combat-train-epochs", type=int, default=2)
     parser.add_argument("--global-train-epochs", type=int, default=8)
+    parser.add_argument("--replay-recent-segments", type=int, default=24, help="How many latest trace segments are considered 'new' for mixed replay")
+    parser.add_argument("--replay-new-ratio", type=float, default=0.4, help="Training sample ratio from recent segments (0-1)")
+    parser.add_argument("--replay-max-train-samples", type=int, default=12000, help="Per-train cap after mixed replay sampling, 0 disables cap")
     parser.add_argument("--combat-hidden1", type=int, default=768)
     parser.add_argument("--combat-hidden2", type=int, default=512)
     parser.add_argument("--noncombat-hidden1", type=int, default=768)
@@ -739,7 +777,7 @@ def run_loop(
 
                 trained_any = False
                 if bool(args.global_train_every_episode):
-                    trained_any = retrain_noncombat_model(
+                    trained_any = retrain_dual_models(
                         repo_root=repo_root,
                         trace_path=trace_path,
                         combat_model_out=args.combat_model,
@@ -749,6 +787,9 @@ def run_loop(
                         combat_hidden2=int(args.combat_hidden2),
                         noncombat_hidden1=int(args.noncombat_hidden1),
                         noncombat_hidden2=int(args.noncombat_hidden2),
+                        replay_recent_segments=max(0, int(args.replay_recent_segments)),
+                        replay_new_ratio=float(args.replay_new_ratio),
+                        replay_max_train_samples=max(0, int(args.replay_max_train_samples)),
                     ) or trained_any
 
                 # Optional periodic full refresh (both models) remains available.
@@ -763,6 +804,9 @@ def run_loop(
                         combat_hidden2=int(args.combat_hidden2),
                         noncombat_hidden1=int(args.noncombat_hidden1),
                         noncombat_hidden2=int(args.noncombat_hidden2),
+                        replay_recent_segments=max(0, int(args.replay_recent_segments)),
+                        replay_new_ratio=float(args.replay_new_ratio),
+                        replay_max_train_samples=max(0, int(args.replay_max_train_samples)),
                     ) or trained_any
 
                 if trained_any:
@@ -848,12 +892,14 @@ def run_loop(
         if (
             (before.state_type or "").strip().lower() == "combat_rewards"
             and action.action_type == "claim_reward"
-            and not result.accepted
             and action.option_index is not None
         ):
+            no_progress = _combat_rewards_key_from_state(before.raw_state) == _combat_rewards_key_from_state(after.raw_state)
+            should_mark_failed = (not result.accepted) or no_progress
             if reward_memory.failed_claim_indices is None:
                 reward_memory.failed_claim_indices = set()
-            reward_memory.failed_claim_indices.add(int(action.option_index))
+            if should_mark_failed:
+                reward_memory.failed_claim_indices.add(int(action.option_index))
 
         if (
             (before.state_type or "").strip().lower() == "shop"
@@ -888,6 +934,9 @@ def run_loop(
                 combat_hidden2=int(args.combat_hidden2),
                 noncombat_hidden1=int(args.noncombat_hidden1),
                 noncombat_hidden2=int(args.noncombat_hidden2),
+                replay_recent_segments=max(0, int(args.replay_recent_segments)),
+                replay_new_ratio=float(args.replay_new_ratio),
+                replay_max_train_samples=max(0, int(args.replay_max_train_samples)),
             )
             if trained:
                 agent.reload_models()
@@ -963,9 +1012,12 @@ def select_forced_noncombat_action(
         rewards = raw.get("rewards") if isinstance(raw.get("rewards"), dict) else {}
         items = rewards.get("items") if isinstance(rewards.get("items"), list) else []
         can_proceed = bool(rewards.get("can_proceed", False))
-        key = f"combat_rewards|items:{len(items)}|can_proceed:{int(can_proceed)}"
+        key = _combat_rewards_key(rewards)
         if reward_memory.key != key or reward_memory.failed_claim_indices is None:
             reward_memory.reset(key)
+
+        player = rewards.get("player") if isinstance(rewards.get("player"), dict) else {}
+        open_slots = _to_int_or_none(player.get("open_potion_slots"))
 
         indexes = sorted(
             {
@@ -977,6 +1029,10 @@ def select_forced_noncombat_action(
         )
         for idx in indexes:
             if idx in reward_memory.failed_claim_indices:
+                continue
+            matched = next((item for item in items if isinstance(item, dict) and int(item.get("index") or -1) == idx), None)
+            if matched is not None and str(matched.get("type") or "").lower() == "potion" and open_slots is not None and open_slots <= 0:
+                reward_memory.failed_claim_indices.add(idx)
                 continue
             return ActionCommand(action_type="claim_reward", option_index=idx, metadata={"policy": "forced_combat_rewards"})
 
@@ -1018,6 +1074,32 @@ def select_forced_noncombat_action(
         if bool(section.get("can_skip")):
             return ActionCommand(action_type="skip_card_reward", metadata={"policy": "forced_card_reward"})
 
+    # Event room handling: advance dialogue first, then pick a stable option policy.
+    if state_type == "event":
+        section = raw.get("event") if isinstance(raw.get("event"), dict) else {}
+        if bool(section.get("in_dialogue", False)):
+            return ActionCommand(action_type="advance_dialogue", metadata={"policy": "forced_event_dialogue"})
+
+        options = section.get("options") if isinstance(section.get("options"), list) else []
+        unlocked: list[tuple[int, dict[str, object]]] = []
+        unlocked_idx = 0
+        for item in options:
+            if not isinstance(item, dict):
+                continue
+            if bool(item.get("is_locked", False)):
+                continue
+            unlocked.append((unlocked_idx, item))
+            unlocked_idx += 1
+
+        if unlocked:
+            # Prefer explicit leave/proceed options, then the safest-looking option.
+            for idx, item in unlocked:
+                if bool(item.get("is_proceed", False)):
+                    return ActionCommand(action_type="event_choose", option_index=idx, metadata={"policy": "forced_event_proceed"})
+
+            safest = sorted(unlocked, key=lambda pair: _event_option_risk_score(pair[1]))[0]
+            return ActionCommand(action_type="event_choose", option_index=safest[0], metadata={"policy": "forced_event_safe"})
+
     # Card select follows STS2MCP semantics:
     # - choose screen: select_card(index) immediately resolves
     # - grid screen: select_card until preview/can_confirm, then confirm_selection
@@ -1035,14 +1117,25 @@ def select_forced_noncombat_action(
             if isinstance(card, dict) and isinstance(card.get("index"), int)
         ]
         required_count = _extract_required_card_count(prompt)
+        preferred_indices = _preferred_card_select_indices(cards, prompt)
+        if not preferred_indices:
+            preferred_indices = list(indices)
 
         key = f"{screen_type}|{prompt}|{len(indices)}|need:{required_count}"
         if memory.key != key or memory.picked is None:
             memory.reset(key, required_count)
 
         if screen_type == "choose":
-            if indices:
-                return ActionCommand(action_type="select_card", option_index=indices[0], metadata={"policy": "forced_card_select_choose"})
+            # STS2MCP choose-a-card overlays often come from potion/event effects.
+            # If skip is available, prefer skipping low-value optional choices to avoid soft-lock loops.
+            if can_cancel and _should_skip_choose_screen(prompt, cards):
+                return ActionCommand(action_type="cancel_selection", metadata={"policy": "forced_card_select_choose_skip"})
+            if preferred_indices:
+                return ActionCommand(
+                    action_type="select_card",
+                    option_index=preferred_indices[0],
+                    metadata={"policy": "forced_card_select_choose"},
+                )
             if can_cancel:
                 return ActionCommand(action_type="cancel_selection", metadata={"policy": "forced_card_select_choose"})
             return ActionCommand(action_type="noop", metadata={"policy": "forced_card_select_choose", "reason": "no_choose_cards"})
@@ -1054,7 +1147,7 @@ def select_forced_noncombat_action(
         if len(memory.picked) >= memory.required_count:
             return ActionCommand(action_type="noop", metadata={"policy": "forced_card_select_wait_confirm", "required": memory.required_count})
 
-        for idx in indices:
+        for idx in preferred_indices:
             if idx not in memory.picked:
                 memory.picked.add(idx)
                 return ActionCommand(action_type="select_card", option_index=idx, metadata={"policy": "forced_card_select_pick"})
@@ -1075,6 +1168,137 @@ def _extract_required_card_count(prompt: str) -> int:
     if match:
         return max(1, int(match.group(1)))
     return 1
+
+
+def _preferred_card_select_indices(cards: list[object], prompt: str) -> list[int]:
+    parsed_cards: list[tuple[int, dict[str, object]]] = []
+    for item in cards:
+        if isinstance(item, dict) and isinstance(item.get("index"), int):
+            parsed_cards.append((int(item["index"]), item))
+    if not parsed_cards:
+        return []
+
+    intent = _card_select_intent(prompt)
+    if intent in {"exhaust", "discard", "remove", "transform"}:
+        ranked = sorted(
+            parsed_cards,
+            key=lambda pair: (-_card_select_trash_score(pair[1]), pair[0]),
+        )
+        return [idx for idx, _ in ranked]
+
+    return [idx for idx, _ in parsed_cards]
+
+
+def _should_skip_choose_screen(prompt: str, cards: list[object]) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+
+    # Optional potion/event offers are usually safe to skip when cancel is enabled.
+    optional_tokens = [
+        "potion",
+        "药水",
+        "colorless",
+        "无色",
+        "discover",
+        "发现",
+        "create",
+        "获得一张",
+        "choose a card",
+    ]
+    if any(token in text for token in optional_tokens):
+        return True
+
+    card_count = sum(1 for item in cards if isinstance(item, dict) and isinstance(item.get("index"), int))
+    # Large random offer pools are typically optional; skip to keep run flow stable.
+    if card_count >= 5 and ("choose" in text or "选择" in text):
+        return True
+    return False
+
+
+def _card_select_intent(prompt: str) -> str:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return "unknown"
+    if any(token in text for token in ["消耗", "exhaust"]):
+        return "exhaust"
+    if any(token in text for token in ["丢弃", "弃置", "discard"]):
+        return "discard"
+    if any(token in text for token in ["移除", "删除", "purge", "remove"]):
+        return "remove"
+    if any(token in text for token in ["转化", "transform"]):
+        return "transform"
+    return "other"
+
+
+def _card_select_trash_score(card: dict[str, object]) -> float:
+    score = 0.0
+    card_type = str(card.get("type") or "").strip().lower()
+    card_id = str(card.get("id") or "").strip().lower()
+    card_name = str(card.get("name") or "").strip().lower()
+    rarity = str(card.get("rarity") or "").strip().lower()
+
+    if card_type in {"curse", "status"}:
+        score += 100.0
+
+    bad_tokens = {
+        "wound",
+        "dazed",
+        "burn",
+        "void",
+        "slimed",
+        "regret",
+        "injury",
+        "clumsy",
+        "normality",
+        "疑虑",
+        "痛苦",
+        "受伤",
+        "灼伤",
+        "淤泥",
+        "眩晕",
+    }
+    haystack = f"{card_id} {card_name}"
+    if any(token in haystack for token in bad_tokens):
+        score += 80.0
+
+    if any(token in haystack for token in ["strike", "defend", "打击", "防御"]):
+        score += 35.0
+
+    if rarity == "common":
+        score += 8.0
+    elif rarity == "uncommon":
+        score += 3.0
+
+    cost = card.get("cost")
+    if isinstance(cost, int):
+        score += min(4.0, float(max(0, cost)))
+    elif isinstance(cost, str) and cost.strip().isdigit():
+        score += min(4.0, float(max(0, int(cost.strip()))))
+
+    if bool(card.get("is_upgraded", False)):
+        score -= 10.0
+    return score
+
+
+def _event_option_risk_score(option: dict[str, object]) -> float:
+    title = str(option.get("title") or "").strip().lower()
+    desc = str(option.get("description") or "").strip().lower()
+    text = f"{title} {desc}"
+
+    if any(token in text for token in ["leave", "continue", "离开", "继续", "跳过"]):
+        return -10.0
+
+    risk = 0.0
+    if any(token in text for token in ["lose", "失去", "hp", "生命", "伤害"]):
+        risk += 6.0
+    if any(token in text for token in ["curse", "诅咒"]):
+        risk += 8.0
+    if any(token in text for token in ["gold", "金币"]):
+        risk += 2.0
+    if any(token in text for token in ["fight", "battle", "战斗"]):
+        risk += 5.0
+    return risk
 
 
 
@@ -1150,6 +1374,9 @@ def retrain_dual_models(
     combat_hidden2: int,
     noncombat_hidden1: int,
     noncombat_hidden2: int,
+    replay_recent_segments: int,
+    replay_new_ratio: float,
+    replay_max_train_samples: int,
 ) -> bool:
     cmd = _build_dual_train_cmd(
         repo_root=repo_root,
@@ -1161,6 +1388,9 @@ def retrain_dual_models(
         combat_hidden2=combat_hidden2,
         noncombat_hidden1=noncombat_hidden1,
         noncombat_hidden2=noncombat_hidden2,
+        replay_recent_segments=replay_recent_segments,
+        replay_new_ratio=replay_new_ratio,
+        replay_max_train_samples=replay_max_train_samples,
         mode="dual",
     )
     print("[dual-rl] retrain cmd:", " ".join(cmd))
@@ -1178,6 +1408,9 @@ def retrain_combat_model(
     combat_hidden2: int,
     noncombat_hidden1: int,
     noncombat_hidden2: int,
+    replay_recent_segments: int,
+    replay_new_ratio: float,
+    replay_max_train_samples: int,
 ) -> bool:
     cmd = _build_dual_train_cmd(
         repo_root=repo_root,
@@ -1189,6 +1422,9 @@ def retrain_combat_model(
         combat_hidden2=combat_hidden2,
         noncombat_hidden1=noncombat_hidden1,
         noncombat_hidden2=noncombat_hidden2,
+        replay_recent_segments=replay_recent_segments,
+        replay_new_ratio=replay_new_ratio,
+        replay_max_train_samples=replay_max_train_samples,
         mode="combat_only",
     )
     print("[dual-rl] combat-train cmd:", " ".join(cmd))
@@ -1206,6 +1442,9 @@ def retrain_noncombat_model(
     combat_hidden2: int,
     noncombat_hidden1: int,
     noncombat_hidden2: int,
+    replay_recent_segments: int,
+    replay_new_ratio: float,
+    replay_max_train_samples: int,
 ) -> bool:
     cmd = _build_dual_train_cmd(
         repo_root=repo_root,
@@ -1217,6 +1456,9 @@ def retrain_noncombat_model(
         combat_hidden2=combat_hidden2,
         noncombat_hidden1=noncombat_hidden1,
         noncombat_hidden2=noncombat_hidden2,
+        replay_recent_segments=replay_recent_segments,
+        replay_new_ratio=replay_new_ratio,
+        replay_max_train_samples=replay_max_train_samples,
         mode="noncombat_only",
     )
     print("[dual-rl] noncombat-train cmd:", " ".join(cmd))
@@ -1234,6 +1476,9 @@ def _build_dual_train_cmd(
     combat_hidden2: int,
     noncombat_hidden1: int,
     noncombat_hidden2: int,
+    replay_recent_segments: int,
+    replay_new_ratio: float,
+    replay_max_train_samples: int,
     mode: str,
 ) -> list[str]:
     cmd = [
@@ -1255,6 +1500,12 @@ def _build_dual_train_cmd(
         str(max(64, int(noncombat_hidden1))),
         "--noncombat-hidden2",
         str(max(32, int(noncombat_hidden2))),
+        "--replay-recent-segments",
+        str(max(0, int(replay_recent_segments))),
+        "--replay-new-ratio",
+        str(max(0.0, min(1.0, float(replay_new_ratio)))),
+        "--replay-max-train-samples",
+        str(max(0, int(replay_max_train_samples))),
     ]
     if mode == "combat_only":
         cmd.append("--train-combat-only")
@@ -1425,7 +1676,6 @@ def _screen_state_signature(raw_state: dict[str, object]) -> tuple[object, ...]:
                     (
                         item.get("index"),
                         item.get("category"),
-                        bool(item.get("is_stocked", False)),
                         bool(item.get("can_afford", False)),
                         item.get("cost"),
                     )
@@ -1438,6 +1688,32 @@ def _screen_state_signature(raw_state: dict[str, object]) -> tuple[object, ...]:
         )
 
     return (state_type,)
+
+
+def _combat_rewards_key_from_state(raw_state: object) -> str:
+    if not isinstance(raw_state, dict):
+        return "combat_rewards|invalid"
+    rewards = raw_state.get("rewards") if isinstance(raw_state.get("rewards"), dict) else {}
+    return _combat_rewards_key(rewards)
+
+
+def _combat_rewards_key(rewards: dict[str, object]) -> str:
+    items = rewards.get("items") if isinstance(rewards.get("items"), list) else []
+    can_proceed = bool(rewards.get("can_proceed", False))
+    player = rewards.get("player") if isinstance(rewards.get("player"), dict) else {}
+    open_slots = _to_int_or_none(player.get("open_potion_slots"))
+
+    item_sig: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        idx = _to_int_or_none(item.get("index"))
+        typ = str(item.get("type") or "")
+        potion_id = str(item.get("potion_id") or "")
+        desc = str(item.get("description") or "")
+        item_sig.append(f"{idx}|{typ}|{potion_id}|{desc}")
+    item_sig.sort()
+    return f"combat_rewards|can_proceed:{int(can_proceed)}|open_slots:{open_slots}|items:{'||'.join(item_sig)}"
 
 
 def extract_run_progress(state: GameStateSnapshot) -> tuple[int, int]:

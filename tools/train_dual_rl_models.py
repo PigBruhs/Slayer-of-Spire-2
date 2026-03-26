@@ -70,6 +70,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--replay-recent-segments", type=int, default=24, help="Latest segments treated as new data for mixed replay")
+    parser.add_argument("--replay-new-ratio", type=float, default=0.4, help="Target ratio of samples from recent segments (0-1)")
+    parser.add_argument("--replay-max-train-samples", type=int, default=12000, help="Training sample cap after replay mixing; 0 disables cap")
     parser.add_argument("--tb-logdir", default="runtime/tensorboard/dual_rl")
     parser.add_argument("--no-tensorboard", action="store_true")
     parser.add_argument("--train-combat-only", action="store_true", help="Train only combat model")
@@ -94,6 +97,21 @@ def main() -> None:
     combat_rows = [row for row in rows if bool(row.before.get("in_combat"))]
     noncombat_rows = [row for row in rows if not bool(row.before.get("in_combat"))]
 
+    combat_rows = mix_replay_rows(
+        rows=combat_rows,
+        recent_segments=max(0, int(args.replay_recent_segments)),
+        new_ratio=float(args.replay_new_ratio),
+        max_train_samples=max(0, int(args.replay_max_train_samples)),
+        tag="combat",
+    )
+    noncombat_rows = mix_replay_rows(
+        rows=noncombat_rows,
+        recent_segments=max(0, int(args.replay_recent_segments)),
+        new_ratio=float(args.replay_new_ratio),
+        max_train_samples=max(0, int(args.replay_max_train_samples)),
+        tag="noncombat",
+    )
+
     if args.train_combat_only and args.train_noncombat_only:
         raise ValueError("--train-combat-only and --train-noncombat-only are mutually exclusive")
 
@@ -111,6 +129,7 @@ def main() -> None:
             reward_fn=combat_reward,
             gamma=float(args.gamma_combat),
         )
+
         model_c = train_regressor(
             x=x_c,
             y=y_c,
@@ -145,6 +164,7 @@ def main() -> None:
             token_buckets=int(args.noncombat_token_buckets),
             numeric_dim=int(args.noncombat_numeric_dim),
         )
+
         model_n = train_noncombat_transformer(
             token_ids=tokens_n,
             numeric=numeric_n,
@@ -219,6 +239,64 @@ def load_transitions(path: Path) -> list[Transition]:
             transitions.append(Transition(segment_id=segment_id, before=before, after=after, action=action, transition=trans))
 
     return transitions
+
+
+def mix_replay_rows(
+    rows: list[Transition],
+    recent_segments: int,
+    new_ratio: float,
+    max_train_samples: int,
+    tag: str,
+) -> list[Transition]:
+    if not rows:
+        return rows
+
+    ratio = max(0.0, min(1.0, float(new_ratio)))
+    ordered_segments = sorted({int(row.segment_id) for row in rows})
+    if recent_segments > 0 and ordered_segments:
+        cutoff_segment = ordered_segments[max(0, len(ordered_segments) - recent_segments)]
+    else:
+        cutoff_segment = ordered_segments[0]
+
+    indexed = list(enumerate(rows))
+    new_pool = [(idx, row) for idx, row in indexed if int(row.segment_id) >= cutoff_segment]
+    old_pool = [(idx, row) for idx, row in indexed if int(row.segment_id) < cutoff_segment]
+
+    total_cap = max_train_samples if max_train_samples > 0 else len(rows)
+    total_cap = max(1, min(total_cap, len(rows)))
+
+    if recent_segments <= 0:
+        selected = indexed
+        if total_cap < len(selected):
+            selected = random.sample(selected, total_cap)
+        selected.sort(key=lambda item: item[0])
+        print(f"[replay] {tag}: mode=full total={len(rows)} used={len(selected)}")
+        return [row for _, row in selected]
+
+    desired_new = min(len(new_pool), int(round(total_cap * ratio)))
+    desired_old = min(len(old_pool), max(0, total_cap - desired_new))
+
+    selected: list[tuple[int, Transition]] = []
+    if desired_new > 0:
+        selected.extend(random.sample(new_pool, desired_new))
+    if desired_old > 0:
+        selected.extend(random.sample(old_pool, desired_old))
+
+    shortfall = total_cap - len(selected)
+    if shortfall > 0:
+        chosen_idx = {idx for idx, _ in selected}
+        remaining = [item for item in indexed if item[0] not in chosen_idx]
+        if remaining:
+            selected.extend(random.sample(remaining, min(shortfall, len(remaining))))
+
+    selected.sort(key=lambda item: item[0])
+    new_used = sum(1 for idx, _ in selected if idx >= 0 and int(rows[idx].segment_id) >= cutoff_segment)
+    print(
+        f"[replay] {tag}: total={len(rows)} used={len(selected)} "
+        f"new_pool={len(new_pool)} old_pool={len(old_pool)} new_used={new_used} "
+        f"recent_segments={recent_segments} target_new_ratio={ratio:.2f}"
+    )
+    return [row for _, row in selected]
 
 
 def build_dataset(
@@ -541,6 +619,9 @@ def save_model_json(
     hidden2: int,
     model_name: str,
     trace_path: Path,
+    checkpoint_epoch: int | None = None,
+    train_huber: float | None = None,
+    valid_rmse: float | None = None,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -562,7 +643,14 @@ def save_model_json(
         "w3": l3.weight.detach().cpu().numpy().T.tolist(),
         "b3": l3.bias.detach().cpu().numpy().tolist(),
     }
-    out_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    if checkpoint_epoch is not None:
+        payload["checkpoint_epoch"] = int(checkpoint_epoch)
+    if train_huber is not None:
+        payload["train_huber"] = float(train_huber)
+    if valid_rmse is not None:
+        payload["valid_rmse"] = float(valid_rmse)
+
+    _atomic_write_json(out_path, payload)
     print(f"model_saved={out_path}")
 
 
@@ -578,6 +666,9 @@ def save_noncombat_transformer_json(
     num_layers: int,
     ff_dim: int,
     dropout: float,
+    checkpoint_epoch: int | None = None,
+    train_huber: float | None = None,
+    valid_rmse: float | None = None,
 ) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     state_dict = {
@@ -598,8 +689,21 @@ def save_noncombat_transformer_json(
         "dropout": float(dropout),
         "state_dict": state_dict,
     }
-    out_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    if checkpoint_epoch is not None:
+        payload["checkpoint_epoch"] = int(checkpoint_epoch)
+    if train_huber is not None:
+        payload["train_huber"] = float(train_huber)
+    if valid_rmse is not None:
+        payload["valid_rmse"] = float(valid_rmse)
+
+    _atomic_write_json(out_path, payload)
     print(f"model_saved={out_path}")
+
+
+def _atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
+    tmp.replace(path)
 
 
 def _extract_floor(compact: dict[str, object]) -> int:

@@ -117,6 +117,18 @@ python tools\train_action_value_model.py --dataset runtime\action_value_dataset.
 python tools\score_action_trace.py --model runtime\action_value_model.json --trace runtime\planner_action_trace.jsonl --count 10
 ```
 
+Offline one-file training launcher (explicit metric summary + model outputs):
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\start_training.py --trace runtime\planner_action_trace.selfplay.jsonl --metrics runtime\selfplay_metrics.jsonl
+```
+
+The launcher prints per-step training metrics and writes:
+
+- latest summary: `runtime\training_summary.json`
+- history log: `runtime\training_metrics.jsonl`
+
 One-file launcher (recommended, no command memorization):
 
 ```powershell

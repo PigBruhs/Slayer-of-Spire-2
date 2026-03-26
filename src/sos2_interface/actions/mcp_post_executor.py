@@ -49,7 +49,7 @@ class McpPostActionExecutor(ActionExecutor):
                 message=mapping_warning or f"Unsupported action_type '{action.action_type}'.",
             )
 
-        response_text, err = self._post_payload(payload)
+        response_text, err, accepted = self._post_payload(payload)
         if err is not None:
             return ActionResult(
                 accepted=False,
@@ -64,7 +64,7 @@ class McpPostActionExecutor(ActionExecutor):
             msg = response_text or "MCP action accepted"
 
         return ActionResult(
-            accepted=True,
+            accepted=bool(accepted),
             executor="mcp_post",
             action_id=action.action_id,
             message=msg,
@@ -175,7 +175,7 @@ class McpPostActionExecutor(ActionExecutor):
             return matches[0], f"ambiguous card '{card_id}' matched multiple copies; using first index {matches[0]}"
         return matches[0], None
 
-    def _post_payload(self, payload: dict[str, object]) -> tuple[str | None, str | None]:
+    def _post_payload(self, payload: dict[str, object]) -> tuple[str | None, str | None, bool]:
         url = self._endpoint_url()
         data = json.dumps(payload, ensure_ascii=True).encode("utf-8")
         req = request.Request(url=url, data=data, method="POST", headers={"Content-Type": "application/json"})
@@ -183,7 +183,8 @@ class McpPostActionExecutor(ActionExecutor):
         try:
             with request.urlopen(req, timeout=self._config.timeout_seconds) as resp:
                 text = resp.read().decode("utf-8")
-                return _extract_ok_message(text), None
+                accepted, message = _extract_mcp_status_and_message(text)
+                return message, None, accepted
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")
             detail = _extract_error_message(body) or exc.reason
@@ -191,11 +192,11 @@ class McpPostActionExecutor(ActionExecutor):
                 expected = "singleplayer" if self._config.mode == "singleplayer" else "multiplayer"
                 other = "multiplayer" if expected == "singleplayer" else "singleplayer"
                 detail = f"{detail}; endpoint mode mismatch (configured={expected}, try={other})"
-            return None, f"mcp POST failed HTTP {exc.code}: {detail}"
+            return None, f"mcp POST failed HTTP {exc.code}: {detail}", False
         except error.URLError as exc:
-            return None, f"mcp POST connection error: {exc.reason}"
+            return None, f"mcp POST connection error: {exc.reason}", False
         except TimeoutError:
-            return None, "mcp POST request timed out"
+            return None, "mcp POST request timed out", False
 
     def _fetch_state(self) -> tuple[dict[str, object] | None, str | None]:
         url = f"{self._endpoint_url()}?format=json"
@@ -256,6 +257,23 @@ def _extract_ok_message(raw: str) -> str | None:
             return str(payload.get("error") or "unknown mcp error")
         return str(payload.get("message") or payload.get("status") or "ok")
     return raw.strip()
+
+
+def _extract_mcp_status_and_message(raw: str) -> tuple[bool, str | None]:
+    if not raw.strip():
+        return True, None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return True, raw.strip()
+    if isinstance(payload, dict):
+        status = str(payload.get("status") or "ok").lower()
+        if status == "error":
+            message = str(payload.get("error") or payload.get("detail") or "unknown mcp error")
+            return False, message
+        message = str(payload.get("message") or payload.get("status") or "ok")
+        return True, message
+    return True, raw.strip()
 
 
 def _extract_error_message(raw: str) -> str | None:
