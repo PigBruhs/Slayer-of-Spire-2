@@ -61,7 +61,7 @@ class McpApiReader(GameReader):
         self._last_state_type = state_type
 
         section = _screen_section(payload, state_type)
-        player = _parse_player(section.get("player") if isinstance(section, dict) else None)
+        player = _extract_player_from_payload(payload, section)
         enemies = _parse_enemies(section.get("enemies") if isinstance(section, dict) else None)
 
         if player.hp <= 0:
@@ -74,7 +74,7 @@ class McpApiReader(GameReader):
         )
         event = _parse_event(payload, state_type)
 
-        in_combat = state_type in {"monster", "elite", "boss", "hand_select"}
+        in_combat = _derive_in_combat(payload, state_type)
         in_event = state_type == "event"
 
         return GameStateSnapshot(
@@ -89,6 +89,10 @@ class McpApiReader(GameReader):
             event=event,
             warnings=warnings,
             state_type=state_type,
+            game_mode=str(payload.get("game_mode")) if payload.get("game_mode") is not None else None,
+            net_type=str(payload.get("net_type")) if payload.get("net_type") is not None else None,
+            player_count=_to_int_or_none(payload.get("player_count")),
+            local_player_slot=_to_int_or_none(payload.get("local_player_slot")),
             raw_state=payload,
         )
 
@@ -185,6 +189,34 @@ def _parse_player(raw: object) -> PlayerState:
         draw_pile_count=draw_count or 0,
         discard_pile_count=discard_count or 0,
     )
+
+
+def _extract_player_from_payload(payload: dict[str, object], section: dict[str, object]) -> PlayerState:
+    # Common paths used by STS2MCP across screens.
+    direct = _parse_player(section.get("player"))
+    if direct.hp > 0 or direct.max_hp > 0:
+        return direct
+
+    battle = payload.get("battle") if isinstance(payload.get("battle"), dict) else {}
+    battle_player = _parse_player(battle.get("player") if isinstance(battle, dict) else None)
+    if battle_player.hp > 0 or battle_player.max_hp > 0:
+        return battle_player
+
+    # Multiplayer always includes a players array, with local slot hint.
+    local_slot = _to_int_or_none(payload.get("local_player_slot"))
+    players = payload.get("players")
+    if isinstance(players, list) and players:
+        if local_slot is not None and 0 <= local_slot < len(players):
+            from_slot = _parse_player(players[local_slot])
+            if from_slot.hp > 0 or from_slot.max_hp > 0:
+                return from_slot
+        for item in players:
+            if isinstance(item, dict) and bool(item.get("is_local")):
+                from_local = _parse_player(item)
+                if from_local.hp > 0 or from_local.max_hp > 0:
+                    return from_local
+
+    return _parse_player(payload.get("player") or _extract_run_player(payload))
 
 
 def _extract_hand_ids(raw: object) -> list[str]:
@@ -385,7 +417,7 @@ def _screen_section(payload: dict[str, object], state_type: str) -> dict[str, ob
         "shop": "shop",
         "rest_site": "rest_site",
         "card_reward": "card_reward",
-        "combat_rewards": "combat_rewards",
+        "combat_rewards": "rewards",
         "card_select": "card_select",
         "relic_select": "relic_select",
         "treasure": "treasure",
@@ -406,3 +438,18 @@ def _extract_run_player(payload: dict[str, object]) -> object:
     if not isinstance(run, dict):
         return None
     return run.get("player")
+
+
+def _derive_in_combat(payload: dict[str, object], state_type: str) -> bool:
+    if state_type in {"monster", "elite", "boss", "hand_select"}:
+        return True
+
+    battle = payload.get("battle")
+    if not isinstance(battle, dict):
+        return False
+
+    # If battle payload exists and has turn/play-phase markers, treat as in-combat.
+    if "turn" in battle or "is_play_phase" in battle or "enemies" in battle:
+        return True
+    return False
+

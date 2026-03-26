@@ -57,5 +57,10 @@ class GameStateSnapshot(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     # MCP screen type, e.g. monster/map/shop/event/menu.
     state_type: str | None = None
+    # MCP mode metadata (mainly for multiplayer endpoint polling).
+    game_mode: str | None = None
+    net_type: str | None = None
+    player_count: int | None = None
+    local_player_slot: int | None = None
     # Full raw state payload from MCP endpoint for downstream debugging/screen-specific logic.
     raw_state: dict[str, Any] = Field(default_factory=dict)

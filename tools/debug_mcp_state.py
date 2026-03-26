@@ -49,6 +49,8 @@ def main() -> None:
             compact = {
                 "frame": snapshot.frame_id,
                 "state_type": state_type,
+                "game_mode": snapshot.game_mode,
+                "net_type": snapshot.net_type,
                 "in_combat": snapshot.in_combat,
                 "in_event": snapshot.in_event,
                 "turn": snapshot.turn,

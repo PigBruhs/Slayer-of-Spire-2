@@ -1,0 +1,9 @@
+{
+  "menu_sequences": [
+    ["enter", "sleep:0.25", "enter", "sleep:0.2", "right", "right", "enter"],
+    ["space", "sleep:0.25", "space", "sleep:0.2", "right", "right", "space"],
+    ["enter", "sleep:0.2", "right", "right", "enter", "enter"],
+    ["enter", "sleep:0.2", "right", "right", "right", "enter"]
+  ]
+}
+

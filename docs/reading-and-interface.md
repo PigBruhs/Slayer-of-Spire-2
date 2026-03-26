@@ -119,14 +119,16 @@
 
 ### 4.2 动作结构：`ActionCommand`
 
-支持动作类型：
+支持动作类型（MCP 对齐，含别名）：
 
-- `play_card`
-- `end_turn`
-- `use_potion`
-- `event_choose`
-- `map_choose`
-- `noop`
+- 战斗：`play_card`、`use_potion`、`end_turn`、`undo_end_turn`、`combat_select_card`、`combat_confirm_selection`
+- 奖励：`claim_reward | rewards_claim`、`select_card_reward | rewards_pick_card`、`skip_card_reward | rewards_skip_card`
+- 场景推进：`proceed | proceed_to_map`
+- 事件与地图：`event_choose | choose_event_option`、`map_choose | choose_map_node`、`advance_dialogue | event_advance_dialogue`
+- 休息点与商店：`choose_rest_option | rest_choose_option`、`shop_purchase`
+- 选牌：`select_card | deck_select_card`、`confirm_selection | deck_confirm_selection`、`cancel_selection | deck_cancel_selection`
+- 遗物与宝箱：`select_relic | relic_select`、`skip_relic_selection | relic_skip`、`claim_treasure_relic | treasure_claim_relic`
+- 其他：`noop`
 
 所有动作包含 `action_id`（用于幂等追踪）。
 
@@ -371,6 +373,51 @@ sos2-planner --reader mcp-api --mcp-config config\mcp_api.example.json --value-m
 - 当前模型是轻量线性回归（SGD），用于快速把动作转移日志转成可学习打分。
 - 目标默认 `return`（折扣回报），由 `build_action_dataset.py` 根据转移变化构造。
 - 这是收敛管线的起步版，后续可升级到 CQL/IQL 或策略梯度，并接入完整终局胜率标签。
+
+### 8.4 自动训练（自对局 + 周期重训）
+
+自动流程脚本：`tools/auto_train_selfplay.py`
+
+能力：
+
+- 自动检测/拉起游戏进程
+- 运行中自动对局；在 `menu` 状态暂停等待人工开启下一局
+- 每回合调用 planner + `mcp-post` 执行动作
+- 出牌节流：默认每张牌间隔 `50ms`
+- 可选等待战斗可行动状态（`is_play_phase/turn/player_actions_disabled`）再打下一张牌
+- 每 `N` 局自动执行：`build_action_dataset.py -> train_action_value_model.py`
+- 输出收敛监控指标到 `runtime/selfplay_metrics.jsonl`
+
+运行示例：
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\auto_train_selfplay.py --game-exe "D:\Steam\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" --episodes 50 --retrain-every 5 --play-card-interval-ms 50 --wait-play-phase
+```
+
+重要限制：
+
+- STS2MCP raw API 当前没有“主菜单开局/返回主菜单”动作；当前脚本不再做主菜单自动化，需人工开下一局。
+- 胜负标签目前是近似判定（是否到达 Act3 Boss 且未观测到玩家死亡），用于先验证收敛速度；建议后续在 mod 侧补充明确的 run outcome 字段。
+
+### 8.5 TensorBoard 收敛可视化
+
+`auto_train_selfplay.py` 与 `train_action_value_model.py` 支持写入 TensorBoard 标量日志。
+
+启动可视化：
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+tensorboard --logdir runtime\tensorboard
+```
+
+常用曲线：
+
+- `selfplay/win`
+- `selfplay/rolling_win_rate`
+- `selfplay/max_act`
+- `train/train_rmse`
+- `train/valid_rmse`
 
 ## 9. 全量卡牌映射（离线，本地生成）
 

@@ -4,6 +4,8 @@ from sos2_interface.contracts.state import EnemyState, GameStateSnapshot
 
 
 def compact_state(state: GameStateSnapshot) -> dict[str, object]:
+    raw = state.raw_state if isinstance(state.raw_state, dict) else {}
+    run = raw.get("run") if isinstance(raw.get("run"), dict) else {}
     return {
         "frame_id": state.frame_id,
         "state_type": state.state_type,
@@ -18,6 +20,11 @@ def compact_state(state: GameStateSnapshot) -> dict[str, object]:
             "hand_count": len(state.player.hand),
             "draw_pile_count": state.player.draw_pile_count,
             "discard_pile_count": state.player.discard_pile_count,
+        },
+        "run": {
+            "act": run.get("act"),
+            "floor": run.get("floor"),
+            "ascension": run.get("ascension"),
         },
         "enemies": [
             {

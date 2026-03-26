@@ -117,6 +117,29 @@ python tools\train_action_value_model.py --dataset runtime\action_value_dataset.
 python tools\score_action_trace.py --model runtime\action_value_model.json --trace runtime\planner_action_trace.jsonl --count 10
 ```
 
+One-file launcher (recommended, no command memorization):
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\start_sampling_training.py
+```
+
+Current control scope is combat-only: pathing/rewards/events/non-combat screens are manual.
+
+You can also run non-interactive presets:
+
+```powershell
+python tools\start_sampling_training.py --mode sample --episodes 30
+python tools\start_sampling_training.py --mode train
+python tools\start_sampling_training.py --mode all --episodes 30
+```
+
+`--mode train` now runs three trainers:
+
+- action-value model (`runtime/action_value_model.json`)
+- larger combat MLP policy model (`runtime/combat_policy_model.json`)
+- branch factor weights (`runtime/branch_factor_weights.json`)
+
 Use the trained model in planner search:
 
 ```powershell
@@ -124,6 +147,31 @@ sos2-planner --reader mcp-api --mcp-config config\mcp_api.example.json --executo
 ```
 
 `mcp-post` now supports raw API operation coverage for combat and non-combat screens, including rewards, map, rest, shop, event choices, card/relic selection overlays, treasure claim, dialogue advance, and multiplayer `undo_end_turn`.
+
+Automatic self-play training loop (manual start-next-run, periodic retrain):
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+python tools\auto_train_selfplay.py --game-exe "D:\Steam\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe" --episodes 50 --retrain-every 5 --play-card-interval-ms 50 --wait-play-phase
+```
+
+Notes:
+
+- Script pauses in `menu` state and waits for you to manually start the next run.
+- Card pacing defaults to 50ms between `play_card` actions, with optional play-phase readiness wait.
+- Episode metrics are written to `runtime\selfplay_metrics.jsonl` for convergence tracking.
+
+TensorBoard convergence visualization:
+
+```powershell
+Set-Location "E:\Slayer-of-Spire-2"
+tensorboard --logdir runtime\tensorboard
+```
+
+Logged tags include:
+
+- `selfplay/win`, `selfplay/rolling_win_rate`, `selfplay/max_act`, `selfplay/max_floor`
+- `train/train_rmse`, `train/valid_rmse`, `train/feature_count`
 
 The planner now performs bounded branch search from current hand and scores each branch using:
 

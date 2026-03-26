@@ -76,31 +76,48 @@ class McpPostActionExecutor(ActionExecutor):
             "undo_end_turn": "undo_end_turn",
             "combat_confirm_selection": "combat_confirm_selection",
             "skip_card_reward": "skip_card_reward",
+            "rewards_skip_card": "skip_card_reward",
             "proceed": "proceed",
+            "proceed_to_map": "proceed",
             "confirm_selection": "confirm_selection",
+            "deck_confirm_selection": "confirm_selection",
             "cancel_selection": "cancel_selection",
+            "deck_cancel_selection": "cancel_selection",
             "skip_relic_selection": "skip_relic_selection",
+            "relic_skip": "skip_relic_selection",
             "advance_dialogue": "advance_dialogue",
+            "event_advance_dialogue": "advance_dialogue",
         }
         if action.action_type in direct_actions:
             return {"action": direct_actions[action.action_type]}, None
 
         index_actions = {
             "event_choose": "choose_event_option",
+            "choose_event_option": "choose_event_option",
             "map_choose": "choose_map_node",
-            "combat_select_card": "combat_select_card",
+            "choose_map_node": "choose_map_node",
             "claim_reward": "claim_reward",
-            "select_card_reward": "select_card_reward",
+            "rewards_claim": "claim_reward",
             "choose_rest_option": "choose_rest_option",
+            "rest_choose_option": "choose_rest_option",
             "shop_purchase": "shop_purchase",
             "select_card": "select_card",
+            "deck_select_card": "select_card",
             "select_relic": "select_relic",
+            "relic_select": "select_relic",
             "claim_treasure_relic": "claim_treasure_relic",
+            "treasure_claim_relic": "claim_treasure_relic",
         }
         if action.action_type in index_actions:
             if action.option_index is None:
                 return None, f"{action.action_type} requires option_index"
             return {"action": index_actions[action.action_type], "index": int(action.option_index)}, None
+
+        if action.action_type in {"combat_select_card", "select_card_reward", "rewards_pick_card"}:
+            if action.option_index is None:
+                return None, f"{action.action_type} requires option_index"
+            mapped = "combat_select_card" if action.action_type == "combat_select_card" else "select_card_reward"
+            return {"action": mapped, "card_index": int(action.option_index)}, None
 
         if action.action_type == "use_potion":
             slot = _metadata_int(action.metadata, "slot")
@@ -170,6 +187,10 @@ class McpPostActionExecutor(ActionExecutor):
         except error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="ignore")
             detail = _extract_error_message(body) or exc.reason
+            if exc.code == 409:
+                expected = "singleplayer" if self._config.mode == "singleplayer" else "multiplayer"
+                other = "multiplayer" if expected == "singleplayer" else "singleplayer"
+                detail = f"{detail}; endpoint mode mismatch (configured={expected}, try={other})"
             return None, f"mcp POST failed HTTP {exc.code}: {detail}"
         except error.URLError as exc:
             return None, f"mcp POST connection error: {exc.reason}"
