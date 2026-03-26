@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,6 +21,9 @@ MIN_OPERATION_DELAY_MS = 500
 MIN_CYCLE_INTERVAL_MS = 500
 STATE_POLL_INTERVAL_MS = 250
 END_TURN_STABLE_POLLS = 4
+SOFT_LOOP_SAME_SIGNATURE_LIMIT = 8
+SOFT_LOOP_WINDOW_SIZE = 20
+SOFT_LOOP_WINDOW_HIT_LIMIT = 12
 
 
 @dataclass
@@ -374,6 +378,9 @@ class PlannerLoop:
         if self._capture_action_trace and self._action_trace_file is not None:
             self._action_trace_file.parent.mkdir(parents=True, exist_ok=True)
         self._iteration = 0
+        self._saw_act3_boss = False
+        self._recent_signatures: deque[tuple[object, ...]] = deque(maxlen=SOFT_LOOP_WINDOW_SIZE)
+        self._same_signature_streak = 0
 
     def run_once(self) -> PlanCycleResult:
         self._wait_min_cycle_interval()
@@ -381,15 +388,17 @@ class PlannerLoop:
         self._last_cycle_ms = int(time.time() * 1000)
         self._iteration += 1
         observed = self._reader.read_state()
+        self._update_episode_markers(observed)
 
-        if observed.player.hp <= 0:
+        terminal_reason = self._detect_terminal_reason(observed)
+        if terminal_reason is not None:
             cycle = PlanCycleResult(
                 iteration=self._iteration,
                 planned_actions=0,
                 executed_actions=0,
-                boundary_reason="player hp depleted",
+                boundary_reason=terminal_reason,
                 warnings=list(observed.warnings),
-                decision_summary="none(player_dead)",
+                decision_summary=f"none({terminal_reason})",
             )
             self._append_trace(observed, [], [], observed, cycle, [])
             return cycle
@@ -456,9 +465,14 @@ class PlannerLoop:
                 break
 
         refreshed = current_state if self._capture_action_trace else self._reader.read_state()
+        self._update_episode_markers(refreshed)
         should_replan, state_reason = self._detector.state_requires_replan(observed, refreshed)
         if should_replan:
             boundary_reason = state_reason
+
+        soft_loop_reason = self._update_soft_loop_state(observed, refreshed, executed_actions)
+        if soft_loop_reason is not None:
+            boundary_reason = soft_loop_reason
 
         warnings = list(dict.fromkeys([*observed.warnings, *refreshed.warnings]))
         cycle = PlanCycleResult(
@@ -481,8 +495,14 @@ class PlannerLoop:
                 f"executed={cycle.executed_actions} boundary='{cycle.boundary_reason}' decision='{cycle.decision_summary}'"
             )
 
-            # Hard stop on player death so caller does not keep cycling in terminal/death screens.
-            if cycle.boundary_reason == "player hp depleted":
+            if cycle.boundary_reason in {
+                "player hp depleted",
+                "episode_terminal:player_hp_zero",
+                "episode_terminal:act3_boss_defeated",
+            }:
+                break
+
+            if cycle.boundary_reason.startswith("soft_loop_detected"):
                 break
 
             if max_iterations is not None and cycle.iteration >= max_iterations:
@@ -598,6 +618,58 @@ class PlannerLoop:
 
         self._last_end_turn_ms = 0
 
+    def _update_episode_markers(self, state: GameStateSnapshot) -> None:
+        raw = state.raw_state if isinstance(state.raw_state, dict) else {}
+        run = raw.get("run") if isinstance(raw.get("run"), dict) else {}
+        act = _to_int_or_none(run.get("act")) or 0
+        if str(state.state_type or "").strip().lower() == "boss" and act >= 3:
+            self._saw_act3_boss = True
+
+    def _detect_terminal_reason(self, state: GameStateSnapshot) -> str | None:
+        if state.player.hp <= 0:
+            return "episode_terminal:player_hp_zero"
+
+        explicit_hp = _extract_explicit_player_hp(state.raw_state if isinstance(state.raw_state, dict) else {})
+        if explicit_hp is not None and explicit_hp <= 0:
+            return "episode_terminal:player_hp_zero"
+
+        if _is_act3_boss_defeated(state, self._saw_act3_boss):
+            return "episode_terminal:act3_boss_defeated"
+        return None
+
+    def _update_soft_loop_state(
+        self,
+        observed: GameStateSnapshot,
+        refreshed: GameStateSnapshot,
+        executed_actions: int,
+    ) -> str | None:
+        if refreshed.in_combat:
+            self._same_signature_streak = 0
+            self._recent_signatures.clear()
+            return None
+
+        refreshed_sig = _state_signature(refreshed)
+        observed_sig = _state_signature(observed)
+        if self._recent_signatures and self._recent_signatures[-1] == refreshed_sig:
+            self._same_signature_streak += 1
+        else:
+            self._same_signature_streak = 1
+        self._recent_signatures.append(refreshed_sig)
+
+        window_hits = sum(1 for item in self._recent_signatures if item == refreshed_sig)
+        no_progress = observed_sig == refreshed_sig
+        if (
+            self._same_signature_streak >= SOFT_LOOP_SAME_SIGNATURE_LIMIT
+            or window_hits >= SOFT_LOOP_WINDOW_HIT_LIMIT
+            or (no_progress and executed_actions > 0 and self._same_signature_streak >= 4)
+        ):
+            state_name = str(refreshed.state_type or "unknown")
+            return (
+                "soft_loop_detected:"
+                f"state={state_name}:streak={self._same_signature_streak}:hits={window_hits}"
+            )
+        return None
+
     @staticmethod
     def _is_ready_for_play_card(state: GameStateSnapshot) -> bool:
         if not state.in_combat:
@@ -653,4 +725,64 @@ def _state_signature(state: GameStateSnapshot) -> tuple[object, ...]:
         enemy_sig,
         warning_sig,
     )
+
+
+def _to_int_or_none(value: object) -> int | None:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    return None
+
+
+def _extract_explicit_player_hp(raw: dict[str, object]) -> int | None:
+    battle = raw.get("battle") if isinstance(raw.get("battle"), dict) else {}
+    battle_player = battle.get("player") if isinstance(battle, dict) else {}
+    hp = _to_int_or_none(battle_player.get("hp") if isinstance(battle_player, dict) else None)
+    if hp is not None:
+        return hp
+
+    top_player = raw.get("player") if isinstance(raw.get("player"), dict) else {}
+    hp = _to_int_or_none(top_player.get("hp") if isinstance(top_player, dict) else None)
+    if hp is not None:
+        return hp
+
+    players = raw.get("players") if isinstance(raw.get("players"), list) else []
+    local_slot = _to_int_or_none(raw.get("local_player_slot"))
+    if local_slot is not None and 0 <= local_slot < len(players):
+        item = players[local_slot]
+        if isinstance(item, dict):
+            hp = _to_int_or_none(item.get("hp"))
+            if hp is not None:
+                return hp
+
+    for item in players:
+        if isinstance(item, dict) and bool(item.get("is_local")):
+            hp = _to_int_or_none(item.get("hp"))
+            if hp is not None:
+                return hp
+    return None
+
+
+def _is_act3_boss_defeated(state: GameStateSnapshot, saw_act3_boss: bool) -> bool:
+    raw = state.raw_state if isinstance(state.raw_state, dict) else {}
+    run = raw.get("run") if isinstance(raw.get("run"), dict) else {}
+
+    for key in ["victory", "won", "is_victory", "is_win"]:
+        value = run.get(key)
+        if isinstance(value, bool) and value:
+            return True
+        if isinstance(value, (int, float)) and int(value) == 1:
+            return True
+
+    act = _to_int_or_none(run.get("act")) or 0
+    state_type = str(state.state_type or "").strip().lower()
+    if saw_act3_boss and (not state.in_combat) and state.player.hp > 0 and act >= 3:
+        return state_type in {"menu", "victory", "win", "game_over", "credits"}
+    return False
+
 

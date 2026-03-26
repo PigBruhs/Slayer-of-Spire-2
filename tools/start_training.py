@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
@@ -45,6 +47,7 @@ def main() -> None:
         raise FileNotFoundError(f"trace not found: {trace_path}")
 
     steps = _build_steps(args, repo_root)
+    _preflight_dependencies(steps, repo_root)
     if args.dry_run:
         print("[trainer] dry-run steps:")
         for step in steps:
@@ -52,8 +55,9 @@ def main() -> None:
         return
 
     run_records: list[dict[str, object]] = []
+    subprocess_env = _build_subprocess_env(repo_root)
     for step in steps:
-        record = _run_step(step_name=str(step["name"]), cmd=list(step["cmd"]), cwd=repo_root)
+        record = _run_step(step_name=str(step["name"]), cmd=list(step["cmd"]), cwd=repo_root, env=subprocess_env)
         run_records.append(record)
         if int(record.get("returncode", 1)) != 0:
             _finalize_and_write_summary(args, started, run_records, repo_root)
@@ -180,7 +184,42 @@ def _build_steps(args: argparse.Namespace, repo_root: Path) -> list[dict[str, ob
     return steps
 
 
-def _run_step(step_name: str, cmd: list[str], cwd: Path) -> dict[str, object]:
+def _build_subprocess_env(repo_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    src_path = str((repo_root / "src").resolve())
+    existing = str(env.get("PYTHONPATH") or "").strip()
+    env["PYTHONPATH"] = src_path if not existing else f"{src_path}{os.pathsep}{existing}"
+    return env
+
+
+def _preflight_dependencies(steps: list[dict[str, object]], repo_root: Path) -> None:
+    required: set[str] = set()
+    step_names = {str(step.get("name") or "") for step in steps}
+
+    # Import chain in policy package pulls numpy/torch for most model training entrypoints.
+    if step_names & {"train_action_value_model", "train_combat_policy_model", "train_dual_rl_models"}:
+        required.add("numpy")
+    if step_names & {"train_action_value_model", "train_dual_rl_models"}:
+        required.add("torch")
+
+    missing = [name for name in sorted(required) if importlib.util.find_spec(name) is None]
+    if not missing:
+        return
+
+    req_file = repo_root / "requirements.txt"
+    req_hint = f'"{sys.executable}" -m pip install -r "{req_file}"'
+    one_by_one = " ".join(missing)
+    direct_hint = f'"{sys.executable}" -m pip install {one_by_one}'
+    raise RuntimeError(
+        "missing python dependencies for training steps: "
+        f"{', '.join(missing)}\n"
+        "install dependencies with one of:\n"
+        f"  {req_hint}\n"
+        f"  {direct_hint}"
+    )
+
+
+def _run_step(step_name: str, cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> dict[str, object]:
     print(f"[trainer] start: {step_name}")
     print(f"[trainer] cmd: {' '.join(cmd)}")
 
@@ -189,6 +228,7 @@ def _run_step(step_name: str, cmd: list[str], cwd: Path) -> dict[str, object]:
     proc = subprocess.Popen(
         cmd,
         cwd=str(cwd),
+        env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

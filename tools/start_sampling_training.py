@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -671,6 +672,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--menu-seq-return", default="return_to_main_menu")
     parser.add_argument("--menu-seq-continue", default="post_run_continue")
     parser.add_argument("--menu-seq-cooldown-ms", type=int, default=2200)
+    parser.add_argument("--soft-loop-streak", type=int, default=6, help="Trigger soft-loop recovery when the same non-combat signature repeats consecutively")
+    parser.add_argument("--soft-loop-window", type=int, default=16, help="Sliding window size for non-combat signature repetition checks")
+    parser.add_argument("--soft-loop-hit-limit", type=int, default=10, help="Trigger soft-loop recovery when a signature appears this many times in the window")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -741,6 +745,8 @@ def run_loop(
     shop_memory = ShopMemory()
     noop_streak = 0
     saw_act3_boss = False
+    same_noncombat_signature_streak = 0
+    recent_noncombat_signatures: deque[tuple[object, ...]] = deque(maxlen=max(4, int(args.soft_loop_window)))
 
     print("[dual-rl] self-learning started")
 
@@ -835,8 +841,9 @@ def run_loop(
             time.sleep(1.0)
             continue
 
-        if in_episode and is_terminal_loss_state(state):
-            print("[flow] terminal loss detected -> running end/recovery flow")
+        terminal_reason = detect_episode_terminal_reason(state, saw_act3_boss)
+        if in_episode and terminal_reason is not None:
+            print(f"[flow] terminal state detected ({terminal_reason}) -> running end/recovery flow")
             now_ms = int(time.time() * 1000)
             if now_ms - last_menu_recovery_ms < max(600, int(args.menu_seq_cooldown_ms)):
                 time.sleep(0.5)
@@ -845,7 +852,7 @@ def run_loop(
 
             # Hard-coded defeat exit flow requested by user:
             # click twice at fixed position with 1s interval, then wait 3s.
-            if not saw_act3_boss:
+            if terminal_reason == "player_hp_zero":
                 window_controller.keep_game_on_top()
                 click_fixed_defeat_exit_button()
                 time.sleep(DEFEAT_EXIT_POST_WAIT_S)
@@ -874,6 +881,8 @@ def run_loop(
             hp_start = max(0, int(state.player.hp))
             max_act = act
             max_floor = floor
+            same_noncombat_signature_streak = 0
+            recent_noncombat_signatures.clear()
             print(f"[dual-rl] episode-start: act={act} floor={floor}")
 
         now_ms = int(time.time() * 1000)
@@ -955,6 +964,49 @@ def run_loop(
             noop_streak += 1
         else:
             noop_streak = 0
+
+        if (not before.in_combat) and (not after.in_combat):
+            after_sig = state_signature(after)
+            before_sig = state_signature(before)
+            if recent_noncombat_signatures and recent_noncombat_signatures[-1] == after_sig:
+                same_noncombat_signature_streak += 1
+            else:
+                same_noncombat_signature_streak = 1
+            recent_noncombat_signatures.append(after_sig)
+
+            hit_count = sum(1 for sig in recent_noncombat_signatures if sig == after_sig)
+            no_progress = before_sig == after_sig
+            soft_loop_triggered = (
+                same_noncombat_signature_streak >= max(2, int(args.soft_loop_streak))
+                or hit_count >= max(3, int(args.soft_loop_hit_limit))
+                or (no_progress and noop_streak >= 3)
+            )
+            if soft_loop_triggered:
+                print(
+                    "[flow] soft loop detected "
+                    f"state={after.state_type} streak={same_noncombat_signature_streak} hits={hit_count}"
+                )
+                window_controller.keep_game_on_top()
+                used = run_return_sequence_twice(
+                    menu_controller=menu_controller,
+                    window_controller=window_controller,
+                    sequence_name=args.menu_seq_return,
+                )
+                if not used:
+                    window_controller.keep_game_on_top()
+                    menu_controller.run_sequence(
+                        args.menu_seq_continue,
+                        min_interval_ms=args.menu_seq_cooldown_ms,
+                        window_controller=window_controller,
+                    )
+                noop_streak = 0
+                same_noncombat_signature_streak = 0
+                recent_noncombat_signatures.clear()
+                time.sleep(1.0)
+                continue
+        else:
+            same_noncombat_signature_streak = 0
+            recent_noncombat_signatures.clear()
 
         if noop_streak >= 3 and (not before.in_combat):
             print("[flow] non-combat noop streak detected -> forcing return sequence")
@@ -1318,6 +1370,32 @@ def is_terminal_loss_state(state: GameStateSnapshot) -> bool:
     if hp is None:
         return False
     return hp <= 0
+
+
+def detect_episode_terminal_reason(state: GameStateSnapshot, saw_act3_boss: bool) -> str | None:
+    if is_terminal_loss_state(state):
+        return "player_hp_zero"
+    if is_terminal_win_state(state, saw_act3_boss):
+        return "act3_boss_defeated"
+    return None
+
+
+def is_terminal_win_state(state: GameStateSnapshot, saw_act3_boss: bool) -> bool:
+    raw = state.raw_state if isinstance(state.raw_state, dict) else {}
+    run = raw.get("run") if isinstance(raw.get("run"), dict) else {}
+
+    for key in ["victory", "won", "is_victory", "is_win"]:
+        value = run.get(key)
+        if isinstance(value, bool) and value:
+            return True
+        if isinstance(value, (int, float)) and int(value) == 1:
+            return True
+
+    act = _to_int_or_none(run.get("act")) or 0
+    state_type = str(state.state_type or "").strip().lower()
+    if saw_act3_boss and (not state.in_combat) and state.player.hp > 0 and act >= 3:
+        return state_type in {"menu", "victory", "win", "game_over", "credits"}
+    return False
 
 
 def extract_explicit_player_hp(raw: dict[str, object]) -> int | None:

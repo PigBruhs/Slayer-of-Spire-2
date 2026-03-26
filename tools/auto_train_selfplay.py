@@ -38,6 +38,7 @@ class EpisodeTracker:
         self.max_act = 0
         self.max_floor = 0
         self.saw_act3_boss = False
+        self.saw_terminal_win = False
         self.saw_player_death = False
         self.cycles = 0
         self.start_hp: int | None = None
@@ -56,6 +57,8 @@ class EpisodeTracker:
 
         if state.state_type == "boss" and act >= 3:
             self.saw_act3_boss = True
+        if _is_terminal_win_state(state, self.saw_act3_boss):
+            self.saw_terminal_win = True
         if state.player.hp <= 0:
             self.saw_player_death = True
 
@@ -64,7 +67,7 @@ class EpisodeTracker:
         self.end_hp = int(state.player.hp)
 
     def finalize(self, episode_number: int, model_path: str | None) -> EpisodeStats:
-        win = self.saw_act3_boss and (not self.saw_player_death)
+        win = self.saw_terminal_win and (not self.saw_player_death)
         start_hp = self.start_hp if self.start_hp is not None else 0
         end_hp = self.end_hp if self.end_hp is not None else 0
         hp_loss = max(0, start_hp - end_hp)
@@ -211,6 +214,14 @@ def main() -> None:
             f"[auto-train] cycle={cycle.iteration} decision={cycle.decision_summary} "
             f"planned={cycle.planned_actions} executed={cycle.executed_actions}"
         )
+        if cycle.boundary_reason.startswith("episode_terminal:"):
+            print(f"[auto-train] terminal cycle boundary={cycle.boundary_reason}; waiting for menu transition")
+            time.sleep(0.5)
+            continue
+        if cycle.boundary_reason.startswith("soft_loop_detected"):
+            print(f"[auto-train] soft loop boundary={cycle.boundary_reason}; pausing before retry")
+            time.sleep(1.0)
+            continue
         if cycle.warnings:
             print(f"[auto-train] warnings: {cycle.warnings}")
         if args.interval_ms > 0:
@@ -433,6 +444,24 @@ def _to_int(value: object) -> int:
     if isinstance(value, str) and value.strip().lstrip("-").isdigit():
         return int(value.strip())
     return 0
+
+
+def _is_terminal_win_state(state, saw_act3_boss: bool) -> bool:
+    raw = state.raw_state if isinstance(state.raw_state, dict) else {}
+    run = raw.get("run") if isinstance(raw.get("run"), dict) else {}
+
+    for key in ["victory", "won", "is_victory", "is_win"]:
+        value = run.get(key)
+        if isinstance(value, bool) and value:
+            return True
+        if isinstance(value, (int, float)) and int(value) == 1:
+            return True
+
+    act = _to_int(run.get("act"))
+    state_type = str(state.state_type or "").strip().lower()
+    if saw_act3_boss and (not state.in_combat) and state.player.hp > 0 and act >= 3:
+        return state_type in {"menu", "victory", "win", "game_over", "credits"}
+    return False
 
 
 if __name__ == "__main__":
