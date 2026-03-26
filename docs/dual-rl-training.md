@@ -1,66 +1,66 @@
-# Dual RL Training (Combat + Non-Combat)
+# Dual RL Pipeline (Single Maintained Flow)
 
-This pipeline trains two separate value models from planner action traces:
+This repository now keeps one training path only:
 
-- `combat_policy_model.json`: optimized for minimizing HP loss during combat.
-- `noncombat_policy_model.json`: optimized for maximizing run progression (act/floor) outside combat.
+1. self-play loop
+2. online retraining
+3. dual model refresh (`combat` + `noncombat`)
 
-## 1) Collect traces
+Entry point:
 
-Run self-play (or manual play with planner actions enabled) to collect `runtime/planner_action_trace*.jsonl`.
+- `tools/start_sampling_training.py`
 
-You can now run a single-file self-learning loop directly (sampling + periodic retraining):
+## Start Continuous Training
 
 ```powershell
 Set-Location "E:\Slayer-of-Spire-2"
-python tools\start_sampling_training.py --episodes 0 --retrain-every 5
+.\.venv\Scripts\Activate.ps1
+python tools\start_sampling_training.py --menu-mouse-config config\auto_menu_mouse.local.json --episodes 0
 ```
 
-`--episodes 0` means continuous learning until you stop it.
+## Runtime Artifacts
 
-For full auto-loop (menu -> singleplayer -> Defect -> next run), configure mouse-only sequences:
+Kept output files:
 
-1. Copy `config/auto_menu_mouse.example.json` to `config/auto_menu_mouse.local.json` (or let capture tool create it).
-2. Run coordinate capture workflow:
+- `runtime/planner_action_trace.selfplay.jsonl`
+- `runtime/planner_cycles.selfplay.jsonl`
+- `runtime/selfplay_metrics.jsonl`
+- `runtime/combat_policy_model.json`
+- `runtime/noncombat_policy_model.json`
+- `runtime/tensorboard/dual_rl/`
+
+Old action-value / branch-weight / autobuild artifacts were removed.
+
+## Menu Automation Requirements
+
+`config/auto_menu_mouse.local.json` must include:
+
+- `start_singleplayer_defect`
+- `softlock_troubleshoot`
+- `return_to_main_menu`
+- `post_run_continue`
+
+Mouse capture is fixed to 6 clicks total:
+
+- 4 for `start_singleplayer_defect`
+- 1 for `softlock_troubleshoot`
+- 1 for `return_to_main_menu`
+
+## Key Training Controls
+
+- run length: `--episodes`
+- retrain cadence: `--retrain-every`
+- global retrain: `--global-train-every-episode`, `--global-train-epochs`
+- combat-only retrain trigger: `--combat-train-every-combat`, `--combat-train-epochs`
+- exploration: `--epsilon-start`, `--epsilon-end`, `--epsilon-decay-episodes`
+- loop recovery: `--soft-loop-streak`, `--soft-loop-window`, `--soft-loop-hit-limit`
+
+## Optional Offline Refresh (Same Dual Models)
+
+If needed, you can still retrain dual models directly from selfplay traces:
 
 ```powershell
 Set-Location "E:\Slayer-of-Spire-2"
-python tools\capture_menu_mouse_config.py --input config\auto_menu_mouse.example.json --output config\auto_menu_mouse.local.json --countdown 3.0
-```
-
-3. Follow prompts to capture each click point.
-   - Defeat-exit button capture is no longer required: script now hard-codes x=853 y=744 and clicks twice with 1s interval, then waits 3s.
-4. Start self-learning loop with the captured config.
-
-```powershell
-Set-Location "E:\Slayer-of-Spire-2"
-python tools\start_sampling_training.py --episodes 0 --retrain-every 5 --menu-mouse-config config\auto_menu_mouse.local.json
-```
-
-Optional explicit sequence name override:
-
-```powershell
-Set-Location "E:\Slayer-of-Spire-2"
-python tools\start_sampling_training.py --episodes 0 --retrain-every 5 --menu-mouse-config config\auto_menu_mouse.local.json --menu-seq-end end_run_to_menu
-```
-
-## 2) Train dual models
-
-```powershell
-Set-Location "E:\Slayer-of-Spire-2"
+.\.venv\Scripts\Activate.ps1
 python tools\train_dual_rl_models.py --trace runtime\planner_action_trace.selfplay.jsonl --combat-out runtime\combat_policy_model.json --noncombat-out runtime\noncombat_policy_model.json --epochs 16
 ```
-
-## 3) Use in planner
-
-```powershell
-Set-Location "E:\Slayer-of-Spire-2"
-python -m sos2_interface.planner_main --reader mcp-api --executor mcp-post --enable-live-actions --combat-model runtime\combat_policy_model.json --noncombat-model runtime\noncombat_policy_model.json --no-combat-only
-```
-
-## Notes
-
-- `--combat-only` keeps non-combat decisions manual.
-- `--no-combat-only` enables non-combat automation using `noncombat_policy_model.json`.
-- Models are trained with discounted returns over contiguous segments (combat and non-combat split).
-

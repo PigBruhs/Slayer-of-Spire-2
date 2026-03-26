@@ -29,6 +29,7 @@ DEFEAT_EXIT_Y = 744
 DEFEAT_EXIT_CLICKS = 2
 DEFEAT_EXIT_CLICK_INTERVAL_MS = 1000
 DEFEAT_EXIT_POST_WAIT_S = 3.0
+TROUBLESHOOT_SEQUENCE_REPEAT_INTERVAL_S = 2.0
 RETURN_SEQUENCE_REPEAT_INTERVAL_S = 2.5
 
 
@@ -126,7 +127,11 @@ class MouseMenuController:
             button = str(step.get("button") or "left").lower()
             interval_ms = max(0, int(step.get("interval_ms") or 120))
             if x is None or y is None:
+                print(f"[menu] skip step, unresolved coords: {step}")
                 continue
+
+            # Log resolved coordinates so we can verify relative-window execution.
+            print(f"[menu] click resolved -> x={x} y={y} source={'gx/gy' if 'gx' in step or 'gy' in step else ('grx/gry' if 'grx' in step or 'gry' in step else 'absolute')}")
 
             self._mouse_click(x, y, button=button, clicks=clicks, interval_ms=interval_ms)
 
@@ -161,11 +166,6 @@ class MouseMenuController:
 
     @staticmethod
     def _resolve_xy(step: dict[str, object], window_controller: "GameWindowController | None" = None) -> tuple[int | None, int | None]:
-        x_raw = step.get("x")
-        y_raw = step.get("y")
-        if isinstance(x_raw, (int, float)) and isinstance(y_raw, (int, float)):
-            return int(x_raw), int(y_raw)
-
         gx = step.get("gx")
         gy = step.get("gy")
         if isinstance(gx, (int, float)) and isinstance(gy, (int, float)) and window_controller is not None:
@@ -181,6 +181,11 @@ class MouseMenuController:
             if rect is not None:
                 left, top, width, height = rect
                 return int(left + float(grx) * max(1, width)), int(top + float(gry) * max(1, height))
+
+        x_raw = step.get("x")
+        y_raw = step.get("y")
+        if isinstance(x_raw, (int, float)) and isinstance(y_raw, (int, float)):
+            return int(x_raw), int(y_raw)
 
         rx = step.get("rx")
         ry = step.get("ry")
@@ -248,13 +253,20 @@ class GameWindowController:
         if hwnd is None:
             return None
 
-        rect = RECT()
-        ok = ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        user32 = ctypes.windll.user32
+        client_rect = RECT()
+        ok = user32.GetClientRect(hwnd, ctypes.byref(client_rect))
         if not ok:
             return None
-        width = int(rect.right - rect.left)
-        height = int(rect.bottom - rect.top)
-        return int(rect.left), int(rect.top), width, height
+
+        origin = ctypes.wintypes.POINT(0, 0)
+        ok = user32.ClientToScreen(hwnd, ctypes.byref(origin))
+        if not ok:
+            return None
+
+        width = int(client_rect.right - client_rect.left)
+        height = int(client_rect.bottom - client_rect.top)
+        return int(origin.x), int(origin.y), width, height
 
     def _find_game_window(self) -> int | None:
         if self._last_hwnd is not None and self._is_hwnd_alive(self._last_hwnd):
@@ -671,6 +683,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--menu-seq-end", default="end_run_to_menu")
     parser.add_argument("--menu-seq-return", default="return_to_main_menu")
     parser.add_argument("--menu-seq-continue", default="post_run_continue")
+    parser.add_argument("--menu-seq-troubleshoot", default="softlock_troubleshoot")
     parser.add_argument("--menu-seq-cooldown-ms", type=int, default=2200)
     parser.add_argument("--soft-loop-streak", type=int, default=6, help="Trigger soft-loop recovery when the same non-combat signature repeats consecutively")
     parser.add_argument("--soft-loop-window", type=int, default=16, help="Sliding window size for non-combat signature repetition checks")
@@ -716,6 +729,11 @@ def main() -> None:
         print(
             "[warn] start menu sequence not found; auto start disabled until configured: "
             f"{args.menu_mouse_config} -> {args.menu_seq_start}"
+        )
+    if not menu_controller.has_sequence(args.menu_seq_troubleshoot):
+        print(
+            "[warn] troubleshoot sequence not found; softlock recovery will fall back to return only: "
+            f"{args.menu_mouse_config} -> {args.menu_seq_troubleshoot}"
         )
 
     run_loop(args, repo_root, reader, executor, agent, trace_path, metrics_path, menu_controller, window_controller)
@@ -986,19 +1004,19 @@ def run_loop(
                     "[flow] soft loop detected "
                     f"state={after.state_type} streak={same_noncombat_signature_streak} hits={hit_count}"
                 )
-                window_controller.keep_game_on_top()
-                used = run_return_sequence_twice(
+                recovered = run_softlock_recovery(
+                    args=args,
+                    reader=reader,
                     menu_controller=menu_controller,
                     window_controller=window_controller,
-                    sequence_name=args.menu_seq_return,
+                    agent=agent,
+                    state=after,
+                    episode_idx=episode_idx,
+                    card_select_memory=card_select_memory,
+                    reward_memory=reward_memory,
+                    shop_memory=shop_memory,
                 )
-                if not used:
-                    window_controller.keep_game_on_top()
-                    menu_controller.run_sequence(
-                        args.menu_seq_continue,
-                        min_interval_ms=args.menu_seq_cooldown_ms,
-                        window_controller=window_controller,
-                    )
+                print(f"[flow] soft lock recovery recovered={recovered}")
                 noop_streak = 0
                 same_noncombat_signature_streak = 0
                 recent_noncombat_signatures.clear()
@@ -1010,19 +1028,19 @@ def run_loop(
 
         if noop_streak >= 3 and (not before.in_combat):
             print("[flow] non-combat noop streak detected -> forcing return sequence")
-            window_controller.keep_game_on_top()
-            used = run_return_sequence_twice(
+            recovered = run_softlock_recovery(
+                args=args,
+                reader=reader,
                 menu_controller=menu_controller,
                 window_controller=window_controller,
-                sequence_name=args.menu_seq_return,
+                agent=agent,
+                state=after,
+                episode_idx=episode_idx,
+                card_select_memory=card_select_memory,
+                reward_memory=reward_memory,
+                shop_memory=shop_memory,
             )
-            if not used:
-                window_controller.keep_game_on_top()
-                menu_controller.run_sequence(
-                    args.menu_seq_continue,
-                    min_interval_ms=args.menu_seq_cooldown_ms,
-                    window_controller=window_controller,
-                )
+            print(f"[flow] noop recovery recovered={recovered}")
             noop_streak = 0
             time.sleep(1.0)
             continue
@@ -1034,13 +1052,14 @@ def run_return_sequence_twice(
     menu_controller: MouseMenuController,
     window_controller: GameWindowController,
     sequence_name: str,
+    repeat_interval_s: float = RETURN_SEQUENCE_REPEAT_INTERVAL_S,
 ) -> bool:
     first = menu_controller.run_sequence(
         sequence_name,
         min_interval_ms=0,
         window_controller=window_controller,
     )
-    time.sleep(RETURN_SEQUENCE_REPEAT_INTERVAL_S)
+    time.sleep(max(0.0, float(repeat_interval_s)))
     window_controller.keep_game_on_top()
     second = menu_controller.run_sequence(
         sequence_name,
@@ -1048,6 +1067,63 @@ def run_return_sequence_twice(
         window_controller=window_controller,
     )
     return bool(first or second)
+
+
+def run_softlock_recovery(
+    args: argparse.Namespace,
+    reader: McpApiReader,
+    menu_controller: MouseMenuController,
+    window_controller: GameWindowController,
+    agent: DualRLAgent,
+    state: GameStateSnapshot,
+    episode_idx: int,
+    card_select_memory: CardSelectMemory,
+    reward_memory: RewardMemory,
+    shop_memory: ShopMemory,
+) -> bool:
+    window_controller.keep_game_on_top()
+    tried_troubleshoot = run_return_sequence_twice(
+        menu_controller=menu_controller,
+        window_controller=window_controller,
+        sequence_name=args.menu_seq_troubleshoot,
+        repeat_interval_s=TROUBLESHOOT_SEQUENCE_REPEAT_INTERVAL_S,
+    )
+    if tried_troubleshoot:
+        probe_state = reader.read_state()
+        if _state_has_non_noop_action(
+            state=probe_state,
+            agent=agent,
+            episode_idx=episode_idx,
+            card_select_memory=card_select_memory,
+            reward_memory=reward_memory,
+            shop_memory=shop_memory,
+        ):
+            return True
+
+    window_controller.keep_game_on_top()
+    run_return_sequence_twice(
+        menu_controller=menu_controller,
+        window_controller=window_controller,
+        sequence_name=args.menu_seq_return,
+        repeat_interval_s=RETURN_SEQUENCE_REPEAT_INTERVAL_S,
+    )
+    return False
+
+
+def _state_has_non_noop_action(
+    state: GameStateSnapshot,
+    agent: DualRLAgent,
+    episode_idx: int,
+    card_select_memory: CardSelectMemory,
+    reward_memory: RewardMemory,
+    shop_memory: ShopMemory,
+) -> bool:
+    forced = select_forced_noncombat_action(state, card_select_memory, reward_memory, shop_memory)
+    if forced is not None:
+        return forced.action_type != "noop"
+
+    candidates = agent._candidates(state)
+    return any(action.action_type != "noop" for action in candidates)
 
 
 def select_forced_noncombat_action(
@@ -1144,12 +1220,16 @@ def select_forced_noncombat_action(
             unlocked_idx += 1
 
         if unlocked:
+            # Avoid potion-reward event options when alternatives exist to reduce known loop cases.
+            non_potion = [pair for pair in unlocked if not _is_event_option_potion_related(pair[1])]
+            candidates = non_potion if non_potion else unlocked
+
             # Prefer explicit leave/proceed options, then the safest-looking option.
-            for idx, item in unlocked:
+            for idx, item in candidates:
                 if bool(item.get("is_proceed", False)):
                     return ActionCommand(action_type="event_choose", option_index=idx, metadata={"policy": "forced_event_proceed"})
 
-            safest = sorted(unlocked, key=lambda pair: _event_option_risk_score(pair[1]))[0]
+            safest = sorted(candidates, key=lambda pair: _event_option_risk_score(pair[1]))[0]
             return ActionCommand(action_type="event_choose", option_index=safest[0], metadata={"policy": "forced_event_safe"})
 
     # Card select follows STS2MCP semantics:
@@ -1351,6 +1431,14 @@ def _event_option_risk_score(option: dict[str, object]) -> float:
     if any(token in text for token in ["fight", "battle", "战斗"]):
         risk += 5.0
     return risk
+
+
+def _is_event_option_potion_related(option: dict[str, object]) -> bool:
+    title = str(option.get("title") or "").strip().lower()
+    desc = str(option.get("description") or "").strip().lower()
+    text = f"{title} {desc}"
+    tokens = ["potion", "药水", "药剂", "potions"]
+    return any(token in text for token in tokens)
 
 
 
