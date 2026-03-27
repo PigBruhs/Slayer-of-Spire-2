@@ -12,7 +12,10 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from sos2_interface.policy.combat_policy_model import extract_feature_vector_from_compact as combat_features
+from sos2_interface.policy.combat_policy_model import (
+    CombatTransformerRegressor,
+    extract_deep_features_from_compact as combat_deep_features,
+)
 from sos2_interface.policy.noncombat_policy_model import (
     NonCombatTransformerRegressor,
     extract_deep_features_from_compact as noncombat_deep_features,
@@ -29,21 +32,6 @@ class Transition:
     transition: dict[str, object]
 
 
-class QRegressor(nn.Module):
-    def __init__(self, input_dim: int, hidden1: int, hidden2: int) -> None:
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden1),
-            nn.ReLU(),
-            nn.Linear(hidden1, hidden2),
-            nn.ReLU(),
-            nn.Linear(hidden2, 1),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train dual RL value models (combat + noncombat) from planner action traces")
     parser.add_argument("--trace", default="runtime/planner_action_trace.selfplay.jsonl")
@@ -51,12 +39,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--noncombat-out", default="runtime/noncombat_policy_model.json")
     parser.add_argument("--gamma-combat", type=float, default=0.96)
     parser.add_argument("--gamma-noncombat", type=float, default=0.995)
-    parser.add_argument("--combat-input-dim", type=int, default=192)
-    parser.add_argument("--noncombat-input-dim", type=int, default=224)
-    parser.add_argument("--combat-hidden1", type=int, default=768)
-    parser.add_argument("--combat-hidden2", type=int, default=512)
-    parser.add_argument("--noncombat-hidden1", type=int, default=768)
-    parser.add_argument("--noncombat-hidden2", type=int, default=512)
+    parser.add_argument("--combat-token-buckets", type=int, default=8192)
+    parser.add_argument("--combat-token-seq-len", type=int, default=40)
+    parser.add_argument("--combat-numeric-dim", type=int, default=24)
+    parser.add_argument("--combat-d-model", type=int, default=192)
+    parser.add_argument("--combat-nhead", type=int, default=6)
+    parser.add_argument("--combat-layers", type=int, default=3)
+    parser.add_argument("--combat-ff-dim", type=int, default=384)
+    parser.add_argument("--combat-dropout", type=float, default=0.1)
     parser.add_argument("--noncombat-token-buckets", type=int, default=8192)
     parser.add_argument("--noncombat-token-seq-len", type=int, default=40)
     parser.add_argument("--noncombat-numeric-dim", type=int, default=24)
@@ -123,19 +113,29 @@ def main() -> None:
         print("tensorboard disabled: install tensorboardX to enable")
 
     if train_combat and combat_rows:
-        x_c, y_c = build_dataset(
+        tokens_c, numeric_c, y_c = build_transformer_dataset(
             combat_rows,
-            feature_fn=lambda before, action: combat_features(before, action, input_dim=args.combat_input_dim),
+            feature_fn=combat_deep_features,
             reward_fn=combat_reward,
             gamma=float(args.gamma_combat),
+            token_seq_len=int(args.combat_token_seq_len),
+            token_buckets=int(args.combat_token_buckets),
+            numeric_dim=int(args.combat_numeric_dim),
         )
 
-        model_c = train_regressor(
-            x=x_c,
+        model_c = train_transformer(
+            model_class=CombatTransformerRegressor,
+            token_ids=tokens_c,
+            numeric=numeric_c,
             y=y_c,
-            input_dim=args.combat_input_dim,
-            hidden1=args.combat_hidden1,
-            hidden2=args.combat_hidden2,
+            token_buckets=int(args.combat_token_buckets),
+            token_seq_len=int(args.combat_token_seq_len),
+            numeric_dim=int(args.combat_numeric_dim),
+            d_model=int(args.combat_d_model),
+            nhead=int(args.combat_nhead),
+            num_layers=int(args.combat_layers),
+            ff_dim=int(args.combat_ff_dim),
+            dropout=float(args.combat_dropout),
             epochs=args.epochs,
             batch_size=args.batch_size,
             lr=args.lr,
@@ -143,21 +143,27 @@ def main() -> None:
             tb_logger=tb_logger,
             tag="combat",
         )
-        save_model_json(
+        save_transformer_json(
             out_path=Path(args.combat_out),
             model=model_c,
-            input_dim=args.combat_input_dim,
-            hidden1=args.combat_hidden1,
-            hidden2=args.combat_hidden2,
-            model_name="combat_value_mlp",
+            model_type_name="combat_transformer_value",
             trace_path=trace_path,
+            token_buckets=int(args.combat_token_buckets),
+            token_seq_len=int(args.combat_token_seq_len),
+            numeric_dim=int(args.combat_numeric_dim),
+            d_model=int(args.combat_d_model),
+            nhead=int(args.combat_nhead),
+            num_layers=int(args.combat_layers),
+            ff_dim=int(args.combat_ff_dim),
+            dropout=float(args.combat_dropout),
         )
     elif train_combat:
         print("[dual-rl] skip combat model: no combat rows")
 
     if train_noncombat and noncombat_rows:
-        tokens_n, numeric_n, y_n = build_noncombat_dataset(
+        tokens_n, numeric_n, y_n = build_transformer_dataset(
             noncombat_rows,
+            feature_fn=noncombat_deep_features,
             reward_fn=noncombat_reward,
             gamma=float(args.gamma_noncombat),
             token_seq_len=int(args.noncombat_token_seq_len),
@@ -165,7 +171,8 @@ def main() -> None:
             numeric_dim=int(args.noncombat_numeric_dim),
         )
 
-        model_n = train_noncombat_transformer(
+        model_n = train_transformer(
+            model_class=NonCombatTransformerRegressor,
             token_ids=tokens_n,
             numeric=numeric_n,
             y=y_n,
@@ -184,9 +191,10 @@ def main() -> None:
             tb_logger=tb_logger,
             tag="noncombat",
         )
-        save_noncombat_transformer_json(
+        save_transformer_json(
             out_path=Path(args.noncombat_out),
             model=model_n,
+            model_type_name="noncombat_transformer_value",
             trace_path=trace_path,
             token_buckets=int(args.noncombat_token_buckets),
             token_seq_len=int(args.noncombat_token_seq_len),
@@ -299,33 +307,9 @@ def mix_replay_rows(
     return [row for _, row in selected]
 
 
-def build_dataset(
+def build_transformer_dataset(
     rows: list[Transition],
     feature_fn,
-    reward_fn,
-    gamma: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    grouped: dict[int, list[Transition]] = {}
-    for row in rows:
-        grouped.setdefault(row.segment_id, []).append(row)
-
-    features: list[np.ndarray] = []
-    targets: list[float] = []
-
-    for _, segment_rows in sorted(grouped.items(), key=lambda item: item[0]):
-        rewards = [reward_fn(step) for step in segment_rows]
-        returns = discounted_returns(rewards, gamma=gamma)
-        for step, target in zip(segment_rows, returns):
-            features.append(feature_fn(step.before, step.action).astype(np.float32))
-            targets.append(float(target))
-
-    x = np.stack(features, axis=0) if features else np.zeros((0, 1), dtype=np.float32)
-    y = np.array(targets, dtype=np.float32)
-    return x, y
-
-
-def build_noncombat_dataset(
-    rows: list[Transition],
     reward_fn,
     gamma: float,
     token_seq_len: int,
@@ -344,21 +328,21 @@ def build_noncombat_dataset(
         rewards = [reward_fn(step) for step in segment_rows]
         returns = discounted_returns(rewards, gamma=gamma)
         for step, target in zip(segment_rows, returns):
-            tokens, numeric = noncombat_deep_features(
+            tokens, numeric = feature_fn(
                 step.before,
                 step.action,
                 token_seq_len=token_seq_len,
                 token_buckets=token_buckets,
                 numeric_dim=numeric_dim,
             )
-            token_list.append(tokens.astype(np.int64))
-            numeric_list.append(numeric.astype(np.float32))
-            targets.append(float(target))
+            token_list.append(tokens)
+            numeric_list.append(numeric)
+            targets.append(target)
 
-    x_tokens = np.stack(token_list, axis=0) if token_list else np.zeros((0, token_seq_len), dtype=np.int64)
-    x_numeric = np.stack(numeric_list, axis=0) if numeric_list else np.zeros((0, numeric_dim), dtype=np.float32)
-    y = np.array(targets, dtype=np.float32)
-    return x_tokens, x_numeric, y
+    if not token_list:
+        return np.zeros((0, token_seq_len), dtype=np.int64), np.zeros((0, numeric_dim), dtype=np.float32), np.zeros((0,), dtype=np.float32)
+
+    return np.stack(token_list), np.stack(numeric_list), np.array(targets, dtype=np.float32)
 
 
 def combat_reward(row: Transition) -> float:
@@ -432,76 +416,8 @@ def discounted_returns(rewards: list[float], gamma: float) -> list[float]:
     return out
 
 
-def train_regressor(
-    x: np.ndarray,
-    y: np.ndarray,
-    input_dim: int,
-    hidden1: int,
-    hidden2: int,
-    epochs: int,
-    batch_size: int,
-    lr: float,
-    weight_decay: float,
-    tb_logger: TensorboardLogger,
-    tag: str,
-) -> QRegressor:
-    if x.shape[0] == 0:
-        raise RuntimeError(f"no samples for {tag} model")
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = QRegressor(input_dim=input_dim, hidden1=hidden1, hidden2=hidden2).to(device)
-
-    idxs = np.arange(x.shape[0])
-    np.random.shuffle(idxs)
-    split = max(1, int(x.shape[0] * 0.9))
-    train_idx = idxs[:split]
-    valid_idx = idxs[split:]
-    if valid_idx.size == 0:
-        valid_idx = train_idx[: min(256, train_idx.size)]
-
-    x_train = torch.from_numpy(x[train_idx])
-    y_train = torch.from_numpy(y[train_idx]).unsqueeze(1)
-    x_valid = torch.from_numpy(x[valid_idx])
-    y_valid = torch.from_numpy(y[valid_idx]).unsqueeze(1)
-
-    loader = DataLoader(TensorDataset(x_train, y_train), batch_size=max(32, batch_size), shuffle=True, drop_last=False)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_fn = nn.SmoothL1Loss()
-
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
-
-    for epoch in range(1, epochs + 1):
-        model.train()
-        total_loss = 0.0
-        total_count = 0
-
-        for batch_x, batch_y in loader:
-            batch_x = batch_x.to(device)
-            batch_y = batch_y.to(device)
-            optimizer.zero_grad(set_to_none=True)
-
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
-                pred = model(batch_x)
-                loss = loss_fn(pred, batch_y)
-
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-
-            total_loss += float(loss.detach().cpu()) * int(batch_x.shape[0])
-            total_count += int(batch_x.shape[0])
-
-        train_loss = total_loss / max(1, total_count)
-        valid_rmse = evaluate_rmse(model, x_valid, y_valid, device)
-        print(f"[{tag}] epoch={epoch} train_huber={train_loss:.5f} valid_rmse={valid_rmse:.5f}")
-        tb_logger.add_scalar(f"dual_rl/{tag}_train_huber", train_loss, epoch)
-        tb_logger.add_scalar(f"dual_rl/{tag}_valid_rmse", valid_rmse, epoch)
-
-    return model.cpu()
-
-
-def train_noncombat_transformer(
+def train_transformer(
+    model_class: type,
     token_ids: np.ndarray,
     numeric: np.ndarray,
     y: np.ndarray,
@@ -519,12 +435,12 @@ def train_noncombat_transformer(
     weight_decay: float,
     tb_logger: TensorboardLogger,
     tag: str,
-) -> NonCombatTransformerRegressor:
+):
     if token_ids.shape[0] == 0:
-        raise RuntimeError("no noncombat samples")
+        raise RuntimeError(f"no {tag} samples")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = NonCombatTransformerRegressor(
+    model = model_class(
         vocab_size=token_buckets,
         token_seq_len=token_seq_len,
         numeric_dim=numeric_dim,
@@ -552,45 +468,58 @@ def train_noncombat_transformer(
 
     class _Dataset(torch.utils.data.Dataset):
         def __len__(self):
-            return int(t_train.shape[0])
+            return t_train.shape[0]
 
         def __getitem__(self, idx):
             return t_train[idx], n_train[idx], y_train[idx]
 
-    loader = DataLoader(_Dataset(), batch_size=max(32, batch_size), shuffle=True, drop_last=False)
+    loader = DataLoader(_Dataset(), batch_size=batch_size, shuffle=True, drop_last=False)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    loss_fn = nn.SmoothL1Loss()
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
+    criterion = nn.HuberLoss(delta=1.0)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=2
+    )
 
-    for epoch in range(1, epochs + 1):
+    best_valid_rmse = float("inf")
+    best_state_dict = None
+
+    print(f"[{tag}] starting transformer training: {t_train.shape[0]} train, {t_valid.shape[0]} valid")
+    for epoch in range(epochs):
         model.train()
-        total_loss = 0.0
-        total_count = 0
-        for batch_t, batch_n, batch_y in loader:
-            batch_t = batch_t.to(device)
-            batch_n = batch_n.to(device)
-            batch_y = batch_y.to(device)
-            optimizer.zero_grad(set_to_none=True)
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda")):
-                pred = model(batch_t, batch_n)
-                loss = loss_fn(pred, batch_y)
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            total_loss += float(loss.detach().cpu()) * int(batch_t.shape[0])
-            total_count += int(batch_t.shape[0])
+        epoch_loss = 0.0
+        for b_t, b_n, b_y in loader:
+            b_t = b_t.to(device)
+            b_n = b_n.to(device)
+            b_y = b_y.to(device)
 
-        train_loss = total_loss / max(1, total_count)
+            optimizer.zero_grad()
+            pred = model(b_t, b_n)
+            loss = criterion(pred, b_y)
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            epoch_loss += float(loss.item() * b_t.shape[0])
+
+        train_huber = epoch_loss / t_train.shape[0]
         valid_rmse = evaluate_transformer_rmse(model, t_valid, n_valid, y_valid, device)
-        print(f"[{tag}] epoch={epoch} train_huber={train_loss:.5f} valid_rmse={valid_rmse:.5f}")
-        tb_logger.add_scalar(f"dual_rl/{tag}_train_huber", train_loss, epoch)
-        tb_logger.add_scalar(f"dual_rl/{tag}_valid_rmse", valid_rmse, epoch)
+        scheduler.step(valid_rmse)
+
+        print(f"[{tag}] epoch {epoch+1:02d}/{epochs} | train_huber: {train_huber:.4f} | valid_rmse: {valid_rmse:.4f}")
+        tb_logger.add_scalar(f"loss_train_{tag}", train_huber, epoch)
+        tb_logger.add_scalar(f"loss_valid_{tag}", valid_rmse, epoch)
+
+        if valid_rmse < best_valid_rmse:
+            best_valid_rmse = valid_rmse
+            best_state_dict = {k: v.cpu() for k, v in model.state_dict().items()}
+
+    if best_state_dict is not None:
+        model.load_state_dict(best_state_dict)
 
     return model.cpu()
 
 
 def evaluate_transformer_rmse(
-    model: NonCombatTransformerRegressor,
+    model: nn.Module,
     t_valid: torch.Tensor,
     n_valid: torch.Tensor,
     y_valid: torch.Tensor,
@@ -598,65 +527,15 @@ def evaluate_transformer_rmse(
 ) -> float:
     model.eval()
     with torch.no_grad():
-        pred = model(t_valid.to(device), n_valid.to(device)).cpu()
-        mse = torch.mean((pred - y_valid) ** 2)
+        pred = model(t_valid.to(device), n_valid.to(device))
+        mse = nn.functional.mse_loss(pred, y_valid.to(device))
     return float(torch.sqrt(mse + 1e-12))
 
 
-def evaluate_rmse(model: QRegressor, x_valid: torch.Tensor, y_valid: torch.Tensor, device: torch.device) -> float:
-    model.eval()
-    with torch.no_grad():
-        pred = model(x_valid.to(device)).cpu()
-        mse = torch.mean((pred - y_valid) ** 2)
-    return float(torch.sqrt(mse + 1e-12))
-
-
-def save_model_json(
+def save_transformer_json(
     out_path: Path,
-    model: QRegressor,
-    input_dim: int,
-    hidden1: int,
-    hidden2: int,
-    model_name: str,
-    trace_path: Path,
-    checkpoint_epoch: int | None = None,
-    train_huber: float | None = None,
-    valid_rmse: float | None = None,
-) -> None:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    l1 = model.net[0]
-    l2 = model.net[2]
-    l3 = model.net[4]
-
-    payload = {
-        "created_at_ms": int(time.time() * 1000),
-        "model_type": model_name,
-        "input_dim": input_dim,
-        "hidden1": hidden1,
-        "hidden2": hidden2,
-        "source_trace": str(trace_path),
-        "w1": l1.weight.detach().cpu().numpy().T.tolist(),
-        "b1": l1.bias.detach().cpu().numpy().tolist(),
-        "w2": l2.weight.detach().cpu().numpy().T.tolist(),
-        "b2": l2.bias.detach().cpu().numpy().tolist(),
-        "w3": l3.weight.detach().cpu().numpy().T.tolist(),
-        "b3": l3.bias.detach().cpu().numpy().tolist(),
-    }
-    if checkpoint_epoch is not None:
-        payload["checkpoint_epoch"] = int(checkpoint_epoch)
-    if train_huber is not None:
-        payload["train_huber"] = float(train_huber)
-    if valid_rmse is not None:
-        payload["valid_rmse"] = float(valid_rmse)
-
-    _atomic_write_json(out_path, payload)
-    print(f"model_saved={out_path}")
-
-
-def save_noncombat_transformer_json(
-    out_path: Path,
-    model: NonCombatTransformerRegressor,
+    model: nn.Module,
+    model_type_name: str,
     trace_path: Path,
     token_buckets: int,
     token_seq_len: int,
@@ -677,7 +556,7 @@ def save_noncombat_transformer_json(
     }
     payload = {
         "created_at_ms": int(time.time() * 1000),
-        "model_type": "noncombat_transformer_value",
+        "model_type": model_type_name,
         "source_trace": str(trace_path),
         "token_buckets": int(token_buckets),
         "token_seq_len": int(token_seq_len),
@@ -730,5 +609,4 @@ def _to_int(value: object) -> int:
 
 if __name__ == "__main__":
     main()
-
 
