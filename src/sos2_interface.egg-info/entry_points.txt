@@ -1,0 +1,3 @@
+[console_scripts]
+sos2-interface = sos2_interface.main:main
+sos2-planner = sos2_interface.planner_main:main

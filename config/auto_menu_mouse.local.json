@@ -1,0 +1,52 @@
+{
+  "sequences": {
+    "start_singleplayer_defect": [
+      {
+        "clicks": 1,
+        "delay_ms": 400,
+        "button": "left",
+        "gx": 514,
+        "gy": 471
+      },
+      {
+        "clicks": 1,
+        "delay_ms": 700,
+        "button": "left",
+        "gx": 367,
+        "gy": 375
+      },
+      {
+        "clicks": 1,
+        "delay_ms": 500,
+        "button": "left",
+        "gx": 757,
+        "gy": 633
+      },
+      {
+        "clicks": 1,
+        "delay_ms": 600,
+        "button": "left",
+        "gx": 1227,
+        "gy": 523
+      }
+    ],
+    "softlock_troubleshoot": [
+      {
+        "clicks": 1,
+        "delay_ms": 600,
+        "button": "left",
+        "gx": 1146,
+        "gy": 546
+      }
+    ],
+    "return_to_main_menu": [
+      {
+        "clicks": 1,
+        "delay_ms": 700,
+        "button": "left",
+        "gx": 632,
+        "gy": 625
+      }
+    ]
+  }
+}

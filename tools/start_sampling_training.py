@@ -667,10 +667,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--replay-recent-segments", type=int, default=24, help="How many latest trace segments are considered 'new' for mixed replay")
     parser.add_argument("--replay-new-ratio", type=float, default=0.4, help="Training sample ratio from recent segments (0-1)")
     parser.add_argument("--replay-max-train-samples", type=int, default=12000, help="Per-train cap after mixed replay sampling, 0 disables cap")
-    parser.add_argument("--combat-hidden1", type=int, default=768)
-    parser.add_argument("--combat-hidden2", type=int, default=512)
-    parser.add_argument("--noncombat-hidden1", type=int, default=768)
-    parser.add_argument("--noncombat-hidden2", type=int, default=512)
+    parser.add_argument("--combat-d-model", type=int, default=192)
+    parser.add_argument("--combat-nhead", type=int, default=6)
+    parser.add_argument("--combat-layers", type=int, default=3)
+    parser.add_argument("--combat-ff-dim", type=int, default=384)
+    parser.add_argument("--noncombat-d-model", type=int, default=192)
+    parser.add_argument("--noncombat-nhead", type=int, default=6)
+    parser.add_argument("--noncombat-layers", type=int, default=3)
+    parser.add_argument("--noncombat-ff-dim", type=int, default=384)
     parser.add_argument("--step-delay-ms", type=int, default=250)
     parser.add_argument("--action-timeout-ms", type=int, default=5000)
     parser.add_argument("--min-action-interval-ms", type=int, default=500)
@@ -807,10 +811,14 @@ def run_loop(
                         combat_model_out=args.combat_model,
                         noncombat_model_out=args.noncombat_model,
                         epochs=max(1, int(args.global_train_epochs)),
-                        combat_hidden1=int(args.combat_hidden1),
-                        combat_hidden2=int(args.combat_hidden2),
-                        noncombat_hidden1=int(args.noncombat_hidden1),
-                        noncombat_hidden2=int(args.noncombat_hidden2),
+                        combat_d_model=int(args.combat_d_model),
+                        combat_nhead=int(args.combat_nhead),
+                        combat_layers=int(args.combat_layers),
+                        combat_ff_dim=int(args.combat_ff_dim),
+                        noncombat_d_model=int(args.noncombat_d_model),
+                        noncombat_nhead=int(args.noncombat_nhead),
+                        noncombat_layers=int(args.noncombat_layers),
+                        noncombat_ff_dim=int(args.noncombat_ff_dim),
                         replay_recent_segments=max(0, int(args.replay_recent_segments)),
                         replay_new_ratio=float(args.replay_new_ratio),
                         replay_max_train_samples=max(0, int(args.replay_max_train_samples)),
@@ -824,10 +832,14 @@ def run_loop(
                         args.combat_model,
                         args.noncombat_model,
                         max(1, int(args.train_epochs)),
-                        combat_hidden1=int(args.combat_hidden1),
-                        combat_hidden2=int(args.combat_hidden2),
-                        noncombat_hidden1=int(args.noncombat_hidden1),
-                        noncombat_hidden2=int(args.noncombat_hidden2),
+                        combat_d_model=int(args.combat_d_model),
+                        combat_nhead=int(args.combat_nhead),
+                        combat_layers=int(args.combat_layers),
+                        combat_ff_dim=int(args.combat_ff_dim),
+                        noncombat_d_model=int(args.noncombat_d_model),
+                        noncombat_nhead=int(args.noncombat_nhead),
+                        noncombat_layers=int(args.noncombat_layers),
+                        noncombat_ff_dim=int(args.noncombat_ff_dim),
                         replay_recent_segments=max(0, int(args.replay_recent_segments)),
                         replay_new_ratio=float(args.replay_new_ratio),
                         replay_max_train_samples=max(0, int(args.replay_max_train_samples)),
@@ -957,10 +969,14 @@ def run_loop(
                 combat_model_out=args.combat_model,
                 noncombat_model_out=args.noncombat_model,
                 epochs=max(1, int(args.combat_train_epochs)),
-                combat_hidden1=int(args.combat_hidden1),
-                combat_hidden2=int(args.combat_hidden2),
-                noncombat_hidden1=int(args.noncombat_hidden1),
-                noncombat_hidden2=int(args.noncombat_hidden2),
+                combat_d_model=int(args.combat_d_model),
+                        combat_nhead=int(args.combat_nhead),
+                        combat_layers=int(args.combat_layers),
+                        combat_ff_dim=int(args.combat_ff_dim),
+                        noncombat_d_model=int(args.noncombat_d_model),
+                        noncombat_nhead=int(args.noncombat_nhead),
+                        noncombat_layers=int(args.noncombat_layers),
+                        noncombat_ff_dim=int(args.noncombat_ff_dim),
                 replay_recent_segments=max(0, int(args.replay_recent_segments)),
                 replay_new_ratio=float(args.replay_new_ratio),
                 replay_max_train_samples=max(0, int(args.replay_max_train_samples)),
@@ -1291,14 +1307,28 @@ def select_forced_noncombat_action(
 
 def _extract_required_card_count(prompt: str) -> int:
     text = str(prompt or "")
-    # English patterns: "Choose 2 cards", "Select 1 card".
-    match = re.search(r"(?i)(choose|select)\s+(\d+)\s+card", text)
+    
+    # English patterns: "Choose 2 cards", "Select 1 card", "Up to 3".
+    match = re.search(r"(?i)(choose|select|up to)\s+(\d+)\s+card", text)
     if match:
         return max(1, int(match.group(2)))
-    # Chinese-like patterns: "选择2张", "选 3 张卡".
-    match = re.search(r"(?:选择|选)\s*(\d+)\s*张", text)
+        
+    # Map for Chinese characters
+    zh_num_map = {
+        "一": "1", "二": "2", "两": "2", "三": "3", "四": "4", "五": "5",
+        "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"
+    }
+    
+    # Replace Chinese numerals with arabic just for parsing
+    parsed_text = text
+    for zh, ar in zh_num_map.items():
+        parsed_text = parsed_text.replace(zh, ar)
+
+    # Chinese-like patterns: "选择2张", "选 3 张卡", "最多选择2张".
+    match = re.search(r"(?:选择|选|最多)\s*(\d+)\s*张", parsed_text)
     if match:
         return max(1, int(match.group(1)))
+        
     return 1
 
 
@@ -1536,10 +1566,14 @@ def retrain_dual_models(
     combat_model_out: str,
     noncombat_model_out: str,
     epochs: int,
-    combat_hidden1: int,
-    combat_hidden2: int,
-    noncombat_hidden1: int,
-    noncombat_hidden2: int,
+    combat_d_model: int,
+    combat_nhead: int,
+    combat_layers: int,
+    combat_ff_dim: int,
+    noncombat_d_model: int,
+    noncombat_nhead: int,
+    noncombat_layers: int,
+    noncombat_ff_dim: int,
     replay_recent_segments: int,
     replay_new_ratio: float,
     replay_max_train_samples: int,
@@ -1550,10 +1584,14 @@ def retrain_dual_models(
         combat_model_out=combat_model_out,
         noncombat_model_out=noncombat_model_out,
         epochs=max(1, int(epochs)),
-        combat_hidden1=combat_hidden1,
-        combat_hidden2=combat_hidden2,
-        noncombat_hidden1=noncombat_hidden1,
-        noncombat_hidden2=noncombat_hidden2,
+        combat_d_model=combat_d_model,
+        combat_nhead=combat_nhead,
+        combat_layers=combat_layers,
+        combat_ff_dim=combat_ff_dim,
+        noncombat_d_model=combat_d_model,
+        noncombat_nhead=combat_nhead,
+        noncombat_layers=combat_layers,
+        noncombat_ff_dim=combat_ff_dim,
         replay_recent_segments=replay_recent_segments,
         replay_new_ratio=replay_new_ratio,
         replay_max_train_samples=replay_max_train_samples,
@@ -1570,10 +1608,14 @@ def retrain_combat_model(
     combat_model_out: str,
     noncombat_model_out: str,
     epochs: int,
-    combat_hidden1: int,
-    combat_hidden2: int,
-    noncombat_hidden1: int,
-    noncombat_hidden2: int,
+    combat_d_model: int,
+    combat_nhead: int,
+    combat_layers: int,
+    combat_ff_dim: int,
+    noncombat_d_model: int,
+    noncombat_nhead: int,
+    noncombat_layers: int,
+    noncombat_ff_dim: int,
     replay_recent_segments: int,
     replay_new_ratio: float,
     replay_max_train_samples: int,
@@ -1584,10 +1626,14 @@ def retrain_combat_model(
         combat_model_out=combat_model_out,
         noncombat_model_out=noncombat_model_out,
         epochs=max(1, int(epochs)),
-        combat_hidden1=combat_hidden1,
-        combat_hidden2=combat_hidden2,
-        noncombat_hidden1=noncombat_hidden1,
-        noncombat_hidden2=noncombat_hidden2,
+        combat_d_model=combat_d_model,
+        combat_nhead=combat_nhead,
+        combat_layers=combat_layers,
+        combat_ff_dim=combat_ff_dim,
+        noncombat_d_model=noncombat_d_model,
+        noncombat_nhead=noncombat_nhead,
+        noncombat_layers=noncombat_layers,
+        noncombat_ff_dim=noncombat_ff_dim,
         replay_recent_segments=replay_recent_segments,
         replay_new_ratio=replay_new_ratio,
         replay_max_train_samples=replay_max_train_samples,
@@ -1604,10 +1650,14 @@ def retrain_noncombat_model(
     combat_model_out: str,
     noncombat_model_out: str,
     epochs: int,
-    combat_hidden1: int,
-    combat_hidden2: int,
-    noncombat_hidden1: int,
-    noncombat_hidden2: int,
+    combat_d_model: int,
+    combat_nhead: int,
+    combat_layers: int,
+    combat_ff_dim: int,
+    noncombat_d_model: int,
+    noncombat_nhead: int,
+    noncombat_layers: int,
+    noncombat_ff_dim: int,
     replay_recent_segments: int,
     replay_new_ratio: float,
     replay_max_train_samples: int,
@@ -1618,10 +1668,14 @@ def retrain_noncombat_model(
         combat_model_out=combat_model_out,
         noncombat_model_out=noncombat_model_out,
         epochs=max(1, int(epochs)),
-        combat_hidden1=combat_hidden1,
-        combat_hidden2=combat_hidden2,
-        noncombat_hidden1=noncombat_hidden1,
-        noncombat_hidden2=noncombat_hidden2,
+        combat_d_model=combat_d_model,
+        combat_nhead=combat_nhead,
+        combat_layers=combat_layers,
+        combat_ff_dim=combat_ff_dim,
+        noncombat_d_model=noncombat_d_model,
+        noncombat_nhead=noncombat_nhead,
+        noncombat_layers=noncombat_layers,
+        noncombat_ff_dim=noncombat_ff_dim,
         replay_recent_segments=replay_recent_segments,
         replay_new_ratio=replay_new_ratio,
         replay_max_train_samples=replay_max_train_samples,
@@ -1638,10 +1692,14 @@ def _build_dual_train_cmd(
     combat_model_out: str,
     noncombat_model_out: str,
     epochs: int,
-    combat_hidden1: int,
-    combat_hidden2: int,
-    noncombat_hidden1: int,
-    noncombat_hidden2: int,
+    combat_d_model: int,
+    combat_nhead: int,
+    combat_layers: int,
+    combat_ff_dim: int,
+    noncombat_d_model: int,
+    noncombat_nhead: int,
+    noncombat_layers: int,
+    noncombat_ff_dim: int,
     replay_recent_segments: int,
     replay_new_ratio: float,
     replay_max_train_samples: int,
@@ -1658,14 +1716,22 @@ def _build_dual_train_cmd(
         noncombat_model_out,
         "--epochs",
         str(max(1, int(epochs))),
-        "--combat-hidden1",
-        str(max(64, int(combat_hidden1))),
-        "--combat-hidden2",
-        str(max(32, int(combat_hidden2))),
-        "--noncombat-hidden1",
-        str(max(64, int(noncombat_hidden1))),
-        "--noncombat-hidden2",
-        str(max(32, int(noncombat_hidden2))),
+        "--combat-d-model",
+        str(max(16, int(combat_d_model))),
+        "--combat-nhead",
+        str(max(1, int(combat_nhead))),
+        "--combat-layers",
+        str(max(1, int(combat_layers))),
+        "--combat-ff-dim",
+        str(max(16, int(combat_ff_dim))),
+        "--noncombat-d-model",
+        str(max(16, int(noncombat_d_model))),
+        "--noncombat-nhead",
+        str(max(1, int(noncombat_nhead))),
+        "--noncombat-layers",
+        str(max(1, int(noncombat_layers))),
+        "--noncombat-ff-dim",
+        str(max(16, int(noncombat_ff_dim))),
         "--replay-recent-segments",
         str(max(0, int(replay_recent_segments))),
         "--replay-new-ratio",

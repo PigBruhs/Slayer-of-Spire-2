@@ -1,0 +1,167 @@
+[
+  {
+    "id": "ALL_CARDS_UPGRADED",
+    "name": "完美牌组",
+    "description": "以全部升级的牌组赢得一局游戏。"
+  },
+  {
+    "id": "ALL_OTHER_ACHIEVEMENTS",
+    "name": "永存者",
+    "description": "完成其他所有成就。"
+  },
+  {
+    "id": "CHARACTER_SKILL_IRONCLAD1",
+    "name": "契约完成",
+    "description": "在一场战斗中消耗20张牌。"
+  },
+  {
+    "id": "CHARACTER_SKILL_IRONCLAD2",
+    "name": "最重之刃",
+    "description": "一击造成999点伤害。"
+  },
+  {
+    "id": "CHARACTER_SKILL_NECROBINDER1",
+    "name": "已经死了",
+    "description": "对单个敌人造成999点灾厄。"
+  },
+  {
+    "id": "CHARACTER_SKILL_NECROBINDER2",
+    "name": "喝奶补钙",
+    "description": "对奥斯提施加50点力量。"
+  },
+  {
+    "id": "CHARACTER_SKILL_REGENT1",
+    "name": "王者之刃",
+    "description": "打造出一张至少999点伤害的君王之剑。"
+  },
+  {
+    "id": "CHARACTER_SKILL_REGENT2",
+    "name": "群日凌空",
+    "description": "拥有20辉星。"
+  },
+  {
+    "id": "CHARACTER_SKILL_SILENT1",
+    "name": "安得奇巧",
+    "description": "通过奇巧机制用一张牌打出5张牌。"
+  },
+  {
+    "id": "CHARACTER_SKILL_SILENT2",
+    "name": "几滴就好",
+    "description": "对一个敌人施加99层中毒。"
+  },
+  {
+    "id": "COMPLETE_ACT4",
+    "name": "真结局",
+    "description": "完成第四阶段。"
+  },
+  {
+    "id": "COMPLETE_TIMELINE",
+    "name": "历史学家",
+    "description": "完成时间线。"
+  },
+  {
+    "id": "DEFEAT_GLORY_ENEMIES",
+    "name": "荣耀",
+    "description": "打败荣耀的所有敌人。"
+  },
+  {
+    "id": "DEFEAT_HIVE_ENEMIES",
+    "name": "巢穴",
+    "description": "打败巢穴的所有敌人。"
+  },
+  {
+    "id": "DEFEAT_ONE_BOSS",
+    "name": "小小开始",
+    "description": "打败一名Boss。"
+  },
+  {
+    "id": "DEFEAT_OVERGROWTH_ENEMIES",
+    "name": "密林",
+    "description": "打败密林的所有敌人。"
+  },
+  {
+    "id": "DEFEAT_UNDERDOCKS_ENEMIES",
+    "name": "暗港",
+    "description": "打败暗港的所有敌人。"
+  },
+  {
+    "id": "DEFECT_ASCENSION10",
+    "name": "回响",
+    "description": "用故障机器人赢得一局进阶10的游戏。"
+  },
+  {
+    "id": "DEFECT_WIN",
+    "name": "故障机器人",
+    "description": "用故障机器人打通游戏。"
+  },
+  {
+    "id": "DISCOVER_ALL_CARDS",
+    "name": "收藏家",
+    "description": "发现所有卡牌。"
+  },
+  {
+    "id": "DISCOVER_ALL_EVENTS",
+    "name": "探险家",
+    "description": "遇到所有事件。"
+  },
+  {
+    "id": "DISCOVER_ALL_RELICS",
+    "name": "考古学家",
+    "description": "发现所有遗物。"
+  },
+  {
+    "id": "FLOOR_TEN_THOUSAND",
+    "name": "好多楼梯",
+    "description": "在尖塔中攀登1万层。"
+  },
+  {
+    "id": "IRONCLAD_ASCENSION10",
+    "name": "恶魔",
+    "description": "用铁甲战士赢得一局进阶10的游戏。"
+  },
+  {
+    "id": "IRONCLAD_WIN",
+    "name": "铁甲战士",
+    "description": "用铁甲战士打通游戏。"
+  },
+  {
+    "id": "NECROBINDER_ASCENSION10",
+    "name": "巫妖",
+    "description": "用亡灵契约师赢得一局进阶10的游戏。"
+  },
+  {
+    "id": "NECROBINDER_WIN",
+    "name": "亡灵契约师",
+    "description": "用亡灵契约师打通游戏。"
+  },
+  {
+    "id": "NO_RELIC_WIN",
+    "name": "身无杂物",
+    "description": "不获得任何遗物打通游戏。"
+  },
+  {
+    "id": "PLAY20_CARDS_SINGLE_TURN",
+    "name": "打牌真开心啊",
+    "description": "在一回合内打出20张牌。"
+  },
+  {
+    "id": "REGENT_ASCENSION10",
+    "name": "帝王",
+    "description": "用储君赢得一局进阶10的游戏。"
+  },
+  {
+    "id": "REGENT_WIN",
+    "name": "储君",
+    "description": "用储君打通游戏。"
+  },
+  {
+    "id": "SILENT_ASCENSION10",
+    "name": "幽魂",
+    "description": "用静默猎手赢得一局进阶10的游戏。"
+  },
+  {
+    "id": "SILENT_WIN",
+    "name": "静默猎手",
+    "description": "用静默猎手打通游戏。"
+  }
+]

@@ -67,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-tensorboard", action="store_true")
     parser.add_argument("--train-combat-only", action="store_true", help="Train only combat model")
     parser.add_argument("--train-noncombat-only", action="store_true", help="Train only noncombat model")
+    parser.add_argument("--resume", action="store_true", help="Resume training from the latest checkpoint")
     return parser.parse_args()
 
 
@@ -123,7 +124,10 @@ def main() -> None:
             numeric_dim=int(args.combat_numeric_dim),
         )
 
+        combat_path = Path(args.combat_out) if args.resume else None
+
         model_c = train_transformer(
+            existing_model_path=combat_path,
             model_class=CombatTransformerRegressor,
             token_ids=tokens_c,
             numeric=numeric_c,
@@ -171,7 +175,10 @@ def main() -> None:
             numeric_dim=int(args.noncombat_numeric_dim),
         )
 
+        noncombat_path = Path(args.noncombat_out) if args.resume else None
+
         model_n = train_transformer(
+            existing_model_path=noncombat_path,
             model_class=NonCombatTransformerRegressor,
             token_ids=tokens_n,
             numeric=numeric_n,
@@ -417,6 +424,7 @@ def discounted_returns(rewards: list[float], gamma: float) -> list[float]:
 
 
 def train_transformer(
+    existing_model_path: Path | None,
     model_class: type,
     token_ids: np.ndarray,
     numeric: np.ndarray,
@@ -449,7 +457,20 @@ def train_transformer(
         num_layers=num_layers,
         ff_dim=ff_dim,
         dropout=dropout,
-    ).to(device)
+    )
+    if existing_model_path and existing_model_path.exists():
+        try:
+            import json
+            with existing_model_path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+            raw_state_dict = payload.get("state_dict")
+            if isinstance(raw_state_dict, dict):
+                state_dict = {key: torch.tensor(value, dtype=torch.float32) for key, value in raw_state_dict.items()}
+                model.load_state_dict(state_dict, strict=False)
+                print(f"[{tag}] Resumed from {existing_model_path}")
+        except Exception as e:
+            print(f"[{tag}] Failed to resume from {existing_model_path}: {e}")
+    model = model.to(device)
 
     idxs = np.arange(token_ids.shape[0])
     np.random.shuffle(idxs)

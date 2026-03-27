@@ -1,0 +1,73 @@
+{"timestamp_ms": 1774433404147, "episode": 1, "win": false, "duration_sec": 48.743, "cycles": 146, "max_act": 1, "max_floor": 2, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774433844397, "episode": 1, "win": false, "duration_sec": 28.214, "cycles": 85, "max_act": 1, "max_floor": 3, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774433970176, "episode": 1, "win": false, "duration_sec": 63.182, "cycles": 190, "max_act": 1, "max_floor": 4, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774435046192, "episode": 1, "win": false, "duration_sec": 52.721, "cycles": 132, "max_act": 1, "max_floor": 3, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774435326250, "episode": 1, "win": false, "duration_sec": 57.182, "cycles": 164, "max_act": 1, "max_floor": 4, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774435326534, "episode": 2, "win": false, "duration_sec": 58.265, "cycles": 116, "max_act": 1, "max_floor": 4, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774435929325, "episode": 1, "win": false, "duration_sec": 6.78, "cycles": 7, "max_act": 1, "max_floor": 2, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+ll}
+{"timestamp_ms": 1774435984928, "episode": 4, "win": false, "duration_sec": 50.534, "cycles": 98, "max_act": 1, "max_floor": 3, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774436343269, "episode": 1, "win": false, "duration_sec": 49.105, "cycles": 422, "max_act": 1, "max_floor": 2, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774436343523, "episode": 5, "win": false, "duration_sec": 48.683, "cycles": 134, "max_act": 1, "max_floor": 2, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774436343740, "episode": 3, "win": false, "duration_sec": 49.001, "cycles": 48, "max_act": 1, "max_floor": 2, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": null}
+{"timestamp_ms": 1774437760484, "episode": 1, "win": false, "duration_sec": 216.978, "cycles": 244, "max_act": 1, "max_floor": 3, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": "runtime\\action_value_model.selfplay.json"}
+{"timestamp_ms": 1774438006769, "episode": 1, "win": false, "duration_sec": 135.938, "cycles": 138, "max_act": 1, "max_floor": 5, "saw_act3_boss": false, "saw_player_death": true, "rolling_win_rate": 0.0, "model_path": "runtime\\action_value_model.selfplay.json"}
+{"timestamp_ms": 1774440085952, "episode": 1, "win": false, "duration_sec": 97.466, "cycles": 77, "max_act": 1, "max_floor": 12, "saw_act3_boss": false, "saw_player_death": true, "start_hp": 39, "end_hp": 0, "hp_loss": 39, "rolling_win_rate": 0.0, "model_path": "runtime\\action_value_model.selfplay.json"}
+{"timestamp_ms": 1774440347837, "episode": 2, "win": false, "duration_sec": 244.528, "cycles": 211, "max_act": 1, "max_floor": 12, "saw_act3_boss": false, "saw_player_death": true, "start_hp": 64, "end_hp": 0, "hp_loss": 64, "rolling_win_rate": 0.0, "model_path": "runtime\\action_value_model.selfplay.json"}
+{"timestamp_ms": 1774440450868, "episode": 3, "win": false, "duration_sec": 92.86, "cycles": 75, "max_act": 1, "max_floor": 4, "saw_act3_boss": false, "saw_player_death": true, "start_hp": 64, "end_hp": 0, "hp_loss": 64, "rolling_win_rate": 0.0, "model_path": "runtime\\action_value_model.selfplay.json"}
+{"timestamp_ms": 1774499830801, "episode": 1, "duration_sec": 6.234, "max_act": 1, "max_floor": 2, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774499974616, "episode": 2, "duration_sec": 140.532, "max_act": 1, "max_floor": 4, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774501010867, "episode": 1, "duration_sec": 83.674, "max_act": 1, "max_floor": 6, "hp_start": 9, "hp_end": 0, "hp_loss": 9, "died": true}
+{"timestamp_ms": 1774501097289, "episode": 2, "duration_sec": 83.093, "max_act": 1, "max_floor": 4, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774501389239, "episode": 1, "duration_sec": 90.897, "max_act": 1, "max_floor": 5, "hp_start": 60, "hp_end": 0, "hp_loss": 60, "died": true}
+{"timestamp_ms": 1774501666787, "episode": 1, "duration_sec": 5.419, "max_act": 1, "max_floor": 5, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774502213099, "episode": 1, "duration_sec": 123.384, "max_act": 1, "max_floor": 7, "hp_start": 46, "hp_end": 0, "hp_loss": 46, "died": true}
+{"timestamp_ms": 1774504824390, "episode": 1, "duration_sec": 165.634, "max_act": 1, "max_floor": 11, "hp_start": 52, "hp_end": 0, "hp_loss": 52, "died": true}
+{"timestamp_ms": 1774505160574, "episode": 2, "duration_sec": 306.659, "max_act": 1, "max_floor": 14, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774505357908, "episode": 3, "duration_sec": 167.446, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774505619345, "episode": 4, "duration_sec": 231.109, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774507720854, "episode": 5, "duration_sec": 2070.452, "max_act": 1, "max_floor": 15, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774509157770, "episode": 1, "duration_sec": 223.796, "max_act": 1, "max_floor": 7, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774510319203, "episode": 1, "duration_sec": 193.872, "max_act": 1, "max_floor": 9, "hp_start": 51, "hp_end": 0, "hp_loss": 51, "died": true}
+{"timestamp_ms": 1774510630491, "episode": 2, "duration_sec": 273.658, "max_act": 1, "max_floor": 13, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774511159172, "episode": 3, "duration_sec": 490.583, "max_act": 1, "max_floor": 17, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774512715153, "episode": 1, "duration_sec": 88.51, "max_act": 1, "max_floor": 6, "hp_start": 58, "hp_end": 0, "hp_loss": 58, "died": true}
+{"timestamp_ms": 1774520789122, "episode": 1, "duration_sec": 144.576, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774522629355, "episode": 1, "duration_sec": 289.314, "max_act": 1, "max_floor": 11, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774522787922, "episode": 2, "duration_sec": 147.937, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774523006312, "episode": 3, "duration_sec": 207.83, "max_act": 1, "max_floor": 7, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774526310626, "episode": 1, "duration_sec": 25.305, "max_act": 1, "max_floor": 7, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774527822695, "episode": 1, "duration_sec": 309.959, "max_act": 1, "max_floor": 17, "hp_start": 12, "hp_end": 0, "hp_loss": 12, "died": true}
+{"timestamp_ms": 1774528185433, "episode": 2, "duration_sec": 351.834, "max_act": 1, "max_floor": 14, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774528410787, "episode": 3, "duration_sec": 214.442, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774528591427, "episode": 4, "duration_sec": 169.612, "max_act": 1, "max_floor": 5, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774528792929, "episode": 5, "duration_sec": 190.451, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774541881240, "episode": 1, "duration_sec": 140.512, "max_act": 1, "max_floor": 6, "hp_start": 54, "hp_end": 0, "hp_loss": 54, "died": true}
+{"timestamp_ms": 1774542443665, "episode": 2, "duration_sec": 548.932, "max_act": 1, "max_floor": 14, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774542789545, "episode": 3, "duration_sec": 332.921, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774542999892, "episode": 4, "duration_sec": 197.305, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774543195420, "episode": 5, "duration_sec": 181.487, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774543440525, "episode": 6, "duration_sec": 224.231, "max_act": 1, "max_floor": 9, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774543782646, "episode": 7, "duration_sec": 325.371, "max_act": 1, "max_floor": 7, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774579162272, "episode": 8, "duration_sec": 35364.501, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774588790498, "episode": 1, "duration_sec": 205.626, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774589110977, "episode": 2, "duration_sec": 307.979, "max_act": 1, "max_floor": 13, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774592549144, "episode": 1, "duration_sec": 271.319, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774592820671, "episode": 2, "duration_sec": 266.735, "max_act": 1, "max_floor": 12, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774593178555, "episode": 3, "duration_sec": 352.593, "max_act": 1, "max_floor": 12, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774593477689, "episode": 4, "duration_sec": 294.236, "max_act": 1, "max_floor": 12, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774593864546, "episode": 5, "duration_sec": 382.024, "max_act": 1, "max_floor": 11, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774594110468, "episode": 6, "duration_sec": 239.59, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774594325401, "episode": 7, "duration_sec": 210.059, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774594896046, "episode": 8, "duration_sec": 565.747, "max_act": 1, "max_floor": 17, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774595167557, "episode": 9, "duration_sec": 266.636, "max_act": 1, "max_floor": 9, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774595360507, "episode": 10, "duration_sec": 187.616, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774595608628, "episode": 11, "duration_sec": 239.704, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774595820565, "episode": 12, "duration_sec": 206.687, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774596132471, "episode": 13, "duration_sec": 306.573, "max_act": 1, "max_floor": 9, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774596441748, "episode": 14, "duration_sec": 304.153, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774596577704, "episode": 15, "duration_sec": 131.124, "max_act": 1, "max_floor": 7, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774596802454, "episode": 16, "duration_sec": 217.971, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774597011353, "episode": 17, "duration_sec": 203.607, "max_act": 1, "max_floor": 6, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774597256722, "episode": 18, "duration_sec": 240.347, "max_act": 1, "max_floor": 8, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
+{"timestamp_ms": 1774597667984, "episode": 19, "duration_sec": 406.513, "max_act": 1, "max_floor": 12, "hp_start": 0, "hp_end": 0, "hp_loss": 0, "died": true}
