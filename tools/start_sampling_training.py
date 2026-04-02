@@ -327,8 +327,8 @@ class DualRLAgent:
         self._combat_model = load_combat_policy_model(self._combat_model_path)
         self._noncombat_model = load_noncombat_policy_model(self._noncombat_model_path)
 
-    def choose(self, state: GameStateSnapshot, episode_index: int) -> ActionCommand:
-        candidates = self._candidates(state)
+    def choose(self, state: GameStateSnapshot, episode_index: int, card_select_memory: CardSelectMemory | None = None) -> ActionCommand:
+        candidates = self._candidates(state, card_select_memory)
         if not candidates:
             return ActionCommand(action_type="noop", metadata={"reason": "no_candidates"})
 
@@ -385,25 +385,41 @@ class DualRLAgent:
         ratio = min(1.0, float(episode_index) / float(self._eps_decay))
         return self._eps_start + (self._eps_end - self._eps_start) * ratio
 
-    def _candidates(self, state: GameStateSnapshot) -> list[ActionCommand]:
+    def _candidates(self, state: GameStateSnapshot, memory: CardSelectMemory | None = None) -> list[ActionCommand]:
         raw = state.raw_state if isinstance(state.raw_state, dict) else {}
         state_type = str(state.state_type or "").strip().lower()
 
         if state_type == "hand_select":
-            return self._hand_select_candidates(raw)
+            return self._hand_select_candidates(raw, memory)
 
         if state.in_combat and state_type in {"monster", "elite", "boss", ""}:
             return self._combat_candidates(raw)
 
         return self._noncombat_candidates(raw, state_type)
 
-    def _hand_select_candidates(self, raw: dict[str, object]) -> list[ActionCommand]:
+    def _hand_select_candidates(self, raw: dict[str, object], memory: CardSelectMemory | None = None) -> list[ActionCommand]:
         actions: list[ActionCommand] = []
         section = raw.get("hand_select") if isinstance(raw.get("hand_select"), dict) else {}
         cards = section.get("cards") if isinstance(section.get("cards"), list) else []
+        
+        indices = [int(c.get("index")) for c in cards if isinstance(c, dict) and isinstance(c.get("index"), int)]
+        key = f"hand_select_{len(indices)}"
+        if memory is not None:
+            if memory.key != key or memory.picked is None:
+                memory.reset(key, 99)
+                
         for card in cards:
             if isinstance(card, dict) and isinstance(card.get("index"), int):
-                actions.append(ActionCommand(action_type="combat_select_card", option_index=int(card["index"])))
+                idx = int(card["index"])
+                if memory is not None and idx in memory.picked:
+                    continue
+                card_id = str(card.get("id") or card.get("name") or "")
+                actions.append(ActionCommand(
+                    action_type="combat_select_card", 
+                    option_index=idx,
+                    card_id=card_id,
+                    metadata={"card_id": card_id}
+                ))
         if bool(section.get("can_confirm")):
             actions.append(ActionCommand(action_type="combat_confirm_selection"))
         return actions
@@ -922,9 +938,15 @@ def run_loop(
 
         before = state
         forced = select_forced_noncombat_action(before, card_select_memory, reward_memory, shop_memory)
-        action = forced if forced is not None else agent.choose(before, episode_idx)
+        action = forced if forced is not None else agent.choose(before, episode_idx, card_select_memory)
         window_controller.keep_game_on_top()
         result = executor.execute(action)
+        
+        state_type_lower = str(before.state_type or "").strip().lower()
+        if state_type_lower == "hand_select" and action.action_type == "combat_select_card" and action.option_index is not None:
+            if card_select_memory.picked is not None:
+                card_select_memory.picked.add(int(action.option_index))
+
         after = wait_state_change(reader, before, timeout_ms=args.action_timeout_ms)
         last_action_ms = int(time.time() * 1000)
 
@@ -1097,6 +1119,11 @@ def run_softlock_recovery(
     reward_memory: RewardMemory,
     shop_memory: ShopMemory,
 ) -> bool:
+    # Clear memories to force retrying selections that were assumed processed
+    card_select_memory.picked = None
+    reward_memory.failed_claim_indices = None
+    shop_memory.failed_purchase_indices = None
+
     window_controller.keep_game_on_top()
     tried_troubleshoot = run_return_sequence_twice(
         menu_controller=menu_controller,
@@ -1150,6 +1177,10 @@ def select_forced_noncombat_action(
 ) -> ActionCommand | None:
     state_type = str(state.state_type or "").strip().lower()
     raw = state.raw_state if isinstance(state.raw_state, dict) else {}
+
+    # Clear card select memory when we definitively leave card selection states
+    if state_type != "card_select" and state_type != "hand_select" and memory.key != "":
+        memory.reset("", 1)
 
     # Combat rewards: claim everything first, then proceed.
     if state_type == "combat_rewards":
@@ -1269,7 +1300,9 @@ def select_forced_noncombat_action(
         if not preferred_indices:
             preferred_indices = list(indices)
 
-        key = f"{screen_type}|{prompt}|{len(indices)}|need:{required_count}"
+        # Hash the first few indices to ensure different events with same count don't collide
+        idx_sig = ",".join(str(x) for x in indices[:5])
+        key = f"{screen_type}|{prompt}|{len(indices)}|{idx_sig}|need:{required_count}"
         if memory.key != key or memory.picked is None:
             memory.reset(key, required_count)
 
@@ -1291,9 +1324,27 @@ def select_forced_noncombat_action(
         if preview_showing or can_confirm:
             return ActionCommand(action_type="confirm_selection", metadata={"policy": "forced_card_select_confirm"})
 
-        # Pick until required count is reached, then wait for confirm to become enabled.
-        if len(memory.picked) >= memory.required_count:
+        # Count cards that are ACTUALLY selected according to game state, not just our memory
+        actual_picked_in_game = sum(1 for c in cards if isinstance(c, dict) and c.get("is_selected", False))
+        
+        # Sync memory picked count with what game says if game reports selections
+        # If the game reports no selections, we might still rely on memory temporarily while it updates,
+        # but if we're stalling, checking actual_picked_in_game avoids infinite loops
+        current_picked = max(len(memory.picked), actual_picked_in_game)
+
+        # Pick until required count is reached, then wait for confirm to become enabled, or let auto-confirm mechanics trigger.
+        if current_picked >= memory.required_count:
+            if not can_confirm:
+                # If we have enough cards but confirm isn't shown, the game might auto-advance. Let it just chill for a frame!
+                # In order to prevent the soft loop trigger counter from falsely interpreting this as a stall, inject random wait reason
+                return ActionCommand(action_type="noop", metadata={"policy": "forced_card_select_wait_confirm", "required": memory.required_count, "state": "auto_processing"})
             return ActionCommand(action_type="noop", metadata={"policy": "forced_card_select_wait_confirm", "required": memory.required_count})
+
+        # If we got forced_card_select_wait_confirm but are stuck, maybe memory isn't in sync.
+        # But wait, if memory.picked had something but game didn't process it, we should maybe retry clicking?
+        # Let's verify our memory.picked cards are actually selected if the game has had time to update!
+        
+        # Actually, let's just use memory.picked. But if memory.picked reached required, we wouldn't reach here.
 
         for idx in preferred_indices:
             if idx not in memory.picked:
@@ -1302,16 +1353,54 @@ def select_forced_noncombat_action(
 
         # If all known cards were tried but confirm is still unavailable, avoid repeated toggle spam.
         return ActionCommand(action_type="noop", metadata={"policy": "forced_card_select_recover", "reason": "await_confirm_state"})
+
+    if state_type == "rest_site":
+        section = raw.get("rest_site") if isinstance(raw.get("rest_site"), dict) else {}
+        options = section.get("options") if isinstance(section.get("options"), list) else []
+        for item in options:
+            if isinstance(item, dict) and isinstance(item.get("index"), int):
+                # Always prefer rest (healing) as a stable guaranteed outcome if available
+                if str(item.get("type") or "").lower() == "rest":
+                    return ActionCommand(action_type="choose_rest_option", option_index=int(item["index"]), metadata={"policy": "forced_rest"})
+        # Fallback to whatever first unlocked option exists
+        for item in options:
+            if isinstance(item, dict) and isinstance(item.get("index"), int) and not bool(item.get("is_locked", False)):
+                return ActionCommand(action_type="choose_rest_option", option_index=int(item["index"]), metadata={"policy": "forced_rest_fallback"})
+
+    if state_type == "relic_select":
+        section = raw.get("relic_select") if isinstance(raw.get("relic_select"), dict) else {}
+        relics = section.get("relics") if isinstance(section.get("relics"), list) else []
+        for relic in relics:
+            if isinstance(relic, dict) and isinstance(relic.get("index"), int):
+                return ActionCommand(action_type="select_relic", option_index=int(relic["index"]), metadata={"policy": "forced_relic_select"})
+        if bool(section.get("can_skip")):
+            return ActionCommand(action_type="skip_relic_selection", metadata={"policy": "forced_relic_skip"})
+
+    if state_type == "treasure":
+        section = raw.get("treasure") if isinstance(raw.get("treasure"), dict) else {}
+        relics = section.get("relics") if isinstance(section.get("relics"), list) else []
+        for relic in relics:
+            if isinstance(relic, dict) and isinstance(relic.get("index"), int):
+                return ActionCommand(action_type="claim_treasure_relic", option_index=int(relic["index"]), metadata={"policy": "forced_treasure_relic"})
+        if bool(section.get("can_proceed")):
+            return ActionCommand(action_type="proceed", metadata={"policy": "forced_treasure_proceed"})
+
+
     return None
 
 
 def _extract_required_card_count(prompt: str) -> int:
     text = str(prompt or "")
     
-    # English patterns: "Choose 2 cards", "Select 1 card", "Up to 3".
-    match = re.search(r"(?i)(choose|select|up to)\s+(\d+)\s+card", text)
+    # English patterns: "Choose 2 cards", "Select 1 card", "Up to 3", "Choose 2 common cards", "Choose 1 card".
+    match = re.search(r"(?i)(?:choose|select|up to)\s+(\d+)", text)
     if match:
-        return max(1, int(match.group(2)))
+        return max(1, int(match.group(1)))
+
+    match_word = re.search(r"(?i)(?:choose|select|up to)\s+(one|two|three|four|five)", text)
+    if match_word:
+        word_map = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+        return word_map[match_word.group(1).lower()]
         
     # Map for Chinese characters
     zh_num_map = {
@@ -1367,6 +1456,14 @@ def _should_skip_choose_screen(prompt: str, cards: list[object]) -> bool:
         "create",
         "获得一张",
         "choose a card",
+        "relic",
+        "artifact",
+        "drink",
+        "brew",
+        "obain",
+        "take",
+        "add",
+        "receive",
     ]
     if any(token in text for token in optional_tokens):
         return True
@@ -1599,6 +1696,8 @@ def retrain_dual_models(
     )
     print("[dual-rl] retrain cmd:", " ".join(cmd))
     result = subprocess.run(cmd, cwd=str(repo_root))
+    if result.returncode != 0:
+        print(f"[dual-rl] ERROR: training subprocess failed with exit code {result.returncode}. Training was skipped!")
     return result.returncode == 0
 
 
@@ -1641,6 +1740,8 @@ def retrain_combat_model(
     )
     print("[dual-rl] combat-train cmd:", " ".join(cmd))
     result = subprocess.run(cmd, cwd=str(repo_root))
+    if result.returncode != 0:
+        print(f"[dual-rl] ERROR: combat training failed with exit code {result.returncode}.")
     return result.returncode == 0
 
 
@@ -1683,6 +1784,8 @@ def retrain_noncombat_model(
     )
     print("[dual-rl] noncombat-train cmd:", " ".join(cmd))
     result = subprocess.run(cmd, cwd=str(repo_root))
+    if result.returncode != 0:
+        print(f"[dual-rl] ERROR: noncombat training failed with exit code {result.returncode}.")
     return result.returncode == 0
 
 
@@ -1848,10 +1951,10 @@ def _screen_state_signature(raw_state: dict[str, object]) -> tuple[object, ...]:
     if state_type == "card_select":
         section = raw_state.get("card_select") if isinstance(raw_state.get("card_select"), dict) else {}
         cards = section.get("cards") if isinstance(section.get("cards"), list) else []
-        card_sig: list[tuple[object, object]] = []
+        card_sig: list[tuple[object, object, bool]] = []
         for card in cards:
             if isinstance(card, dict):
-                card_sig.append((card.get("index"), card.get("id") or card.get("name")))
+                card_sig.append((card.get("index"), card.get("id") or card.get("name"), bool(card.get("is_selected", False))))
         return (
             state_type,
             section.get("screen_type"),

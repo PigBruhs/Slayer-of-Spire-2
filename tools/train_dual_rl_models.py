@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--noncombat-ff-dim", type=int, default=384)
     parser.add_argument("--noncombat-dropout", type=float, default=0.1)
     parser.add_argument("--epochs", type=int, default=16)
-    parser.add_argument("--batch-size", type=int, default=512)
+    parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-5)
     parser.add_argument("--seed", type=int, default=42)
