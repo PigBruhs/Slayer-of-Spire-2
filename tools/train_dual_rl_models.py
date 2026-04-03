@@ -369,6 +369,12 @@ def combat_reward(row: Transition) -> float:
         if bool(item.get("died")):
             kills += 1.0
 
+    if bool(t.get("player_died")):
+        enemy_damage = 0.0
+        kills = 0.0
+    else:
+        enemy_damage = min(999.0, enemy_damage)
+
     # Main objective: preserve HP while still ending fights efficiently.
     reward = 0.0
     reward += hp_delta * 6.0

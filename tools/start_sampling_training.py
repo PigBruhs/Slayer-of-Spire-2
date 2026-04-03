@@ -1234,21 +1234,6 @@ def select_forced_noncombat_action(
         if not buyable:
             return ActionCommand(action_type="proceed", metadata={"policy": "forced_shop_exit"})
 
-    # Card reward is a strict screen: choose one card or skip.
-    if state_type == "card_reward":
-        section = raw.get("card_reward") if isinstance(raw.get("card_reward"), dict) else {}
-        cards = section.get("cards") if isinstance(section.get("cards"), list) else []
-        card_indexes = [
-            int(card.get("index"))
-            for card in cards
-            if isinstance(card, dict) and isinstance(card.get("index"), int)
-        ]
-        if card_indexes:
-            # Follow STS2MCP guidance: use indices from state directly.
-            return ActionCommand(action_type="select_card_reward", option_index=card_indexes[0], metadata={"policy": "forced_card_reward"})
-        if bool(section.get("can_skip")):
-            return ActionCommand(action_type="skip_card_reward", metadata={"policy": "forced_card_reward"})
-
     # Event room handling: advance dialogue first, then pick a stable option policy.
     if state_type == "event":
         section = raw.get("event") if isinstance(raw.get("event"), dict) else {}
@@ -1283,7 +1268,7 @@ def select_forced_noncombat_action(
     # - choose screen: select_card(index) immediately resolves
     # - grid screen: select_card until preview/can_confirm, then confirm_selection
     if state_type == "card_select":
-        section = raw.get("card_select") if isinstance(raw.get("card_select"), dict) else {}
+        section = raw_state.get("card_select") if isinstance(raw_state.get("card_select"), dict) else {}
         screen_type = str(section.get("screen_type") or "").strip().lower()
         prompt = str(section.get("prompt") or "")
         preview_showing = bool(section.get("preview_showing", False))
@@ -1392,32 +1377,35 @@ def select_forced_noncombat_action(
 def _extract_required_card_count(prompt: str) -> int:
     text = str(prompt or "")
     
-    # English patterns: "Choose 2 cards", "Select 1 card", "Up to 3", "Choose 2 common cards", "Choose 1 card".
-    match = re.search(r"(?i)(?:choose|select|up to)\s+(\d+)", text)
-    if match:
-        return max(1, int(match.group(1)))
-
-    match_word = re.search(r"(?i)(?:choose|select|up to)\s+(one|two|three|four|five)", text)
-    if match_word:
-        word_map = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
-        return word_map[match_word.group(1).lower()]
+    # Normalize english words to digits
+    word_map = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    parsed_text = text.lower()
+    for w, n in word_map.items():
+        parsed_text = re.sub(rf'\b{w}\b', str(n), parsed_text)
         
     # Map for Chinese characters
     zh_num_map = {
         "一": "1", "二": "2", "两": "2", "三": "3", "四": "4", "五": "5",
         "六": "6", "七": "7", "八": "8", "九": "9", "十": "10"
     }
-    
-    # Replace Chinese numerals with arabic just for parsing
-    parsed_text = text
     for zh, ar in zh_num_map.items():
         parsed_text = parsed_text.replace(zh, ar)
 
-    # Chinese-like patterns: "选择2张", "选 3 张卡", "最多选择2张".
-    match = re.search(r"(?:选择|选|最多)\s*(\d+)\s*张", parsed_text)
+    # 1. "up to N"
+    match = re.search(r"up\s+to\s+(\d+)|最多\s*(\d+)", parsed_text)
+    if match:
+        return max(1, int(match.group(1) or match.group(2)))
+
+    # 2. Action + N
+    match = re.search(r"(?:choose|select|enchant|transform|upgrade|remove|discard|exhaust|play|add|选择|选)\s+(\d+)", parsed_text)
     if match:
         return max(1, int(match.group(1)))
-        
+
+    # 3. N + "card(s)"
+    match = re.search(r"(\d+)\s*(?:card|张|个)", parsed_text)
+    if match:
+        return max(1, int(match.group(1)))
+
     return 1
 
 
