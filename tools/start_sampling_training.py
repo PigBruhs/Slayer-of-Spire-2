@@ -1268,7 +1268,7 @@ def select_forced_noncombat_action(
     # - choose screen: select_card(index) immediately resolves
     # - grid screen: select_card until preview/can_confirm, then confirm_selection
     if state_type == "card_select":
-        section = raw_state.get("card_select") if isinstance(raw_state.get("card_select"), dict) else {}
+        section = raw.get("card_select") if isinstance(raw.get("card_select"), dict) else {}
         screen_type = str(section.get("screen_type") or "").strip().lower()
         prompt = str(section.get("prompt") or "")
         preview_showing = bool(section.get("preview_showing", False))

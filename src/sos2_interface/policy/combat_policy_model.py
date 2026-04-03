@@ -205,11 +205,16 @@ def extract_feature_vector(state: GameStateSnapshot, action: ActionCommand, inpu
     enemy_block_total = 0.0
     incoming_damage = 0.0
     enemy_count = 0.0
+    has_invincible = False
     for enemy in state.enemies:
-        if enemy.hp <= 0:
+        hp = float(enemy.hp)
+        if hp > 9999.0:
+            hp = 999.0
+            has_invincible = True
+        if hp <= 0:
             continue
         enemy_count += 1.0
-        enemy_hp_total += float(enemy.hp)
+        enemy_hp_total += hp
         enemy_block_total += float(enemy.block)
         for intent in enemy.intents:
             if intent.intent_type in {"attack", "multi_attack", "unknown"}:
@@ -248,6 +253,9 @@ def extract_feature_vector(state: GameStateSnapshot, action: ActionCommand, inpu
         vec[48] = float(cost) / 5.0
     if action.option_index is not None:
         vec[49] = float(action.option_index) / 10.0
+        
+    if has_invincible:
+        vec[52] = 1.0
 
     # Hashed sparse features for ids/text (64+)
     _set_hashed(vec, 64, 64, action.card_id)
@@ -288,6 +296,8 @@ def extract_feature_vector_from_compact(
     enemy_count = 0.0
     for enemy in enemies:
         hp = _to_float(enemy.get("hp"), 0.0)
+        if hp > 9999.0:
+            hp = 999.0
         if hp <= 0:
             continue
         enemy_count += 1.0
@@ -387,31 +397,38 @@ def extract_deep_features_from_compact(
     numeric_dim: int = DEFAULT_NUMERIC_DIM,
 ) -> tuple[np.ndarray, np.ndarray]:
     metadata = action_payload.get("metadata") if isinstance(action_payload.get("metadata"), dict) else {}
-    tokens = [
-        f"state:{compact_state.get('state_type') or 'unknown'}",
-        f"action:{action_payload.get('action_type') or 'noop'}",
-        f"card:{action_payload.get('card_id') or ''}",
-        f"target:{action_payload.get('target_id') or ''}",
-        f"potion:{metadata.get('potion_id') if isinstance(metadata, dict) else ''}",
-    ]
-    token_ids = np.zeros((int(token_seq_len),), dtype=np.int64)
-    for idx, token in enumerate(tokens[:token_seq_len]):
-        token_ids[idx] = _hash_to_bucket(str(token), int(token_buckets))
-
+    
     player = compact_state.get("player") if isinstance(compact_state.get("player"), dict) else {}
     enemies = compact_state.get("enemies") if isinstance(compact_state.get("enemies"), list) else []
     
     enemy_hp_total = 0.0
     enemy_block_total = 0.0
     enemy_alive = 0.0
+    has_invincible = False
     for item in enemies:
         if not isinstance(item, dict):
             continue
         hp = _to_float(item.get("hp"), 0.0)
+        if hp > 9999.0:
+            has_invincible = True
+            hp = 999.0
+            
         if hp > 0:
             enemy_alive += 1.0
             enemy_hp_total += hp
             enemy_block_total += _to_float(item.get("block"), 0.0)
+
+    tokens = [
+        f"state:{compact_state.get('state_type') or 'unknown'}",
+        f"action:{action_payload.get('action_type') or 'noop'}",
+        f"card:{action_payload.get('card_id') or ''}",
+        f"target:{action_payload.get('target_id') or ''}",
+        f"potion:{metadata.get('potion_id') if isinstance(metadata, dict) else ''}",
+        f"invincible:{'1' if has_invincible else '0'}",
+    ]
+    token_ids = np.zeros((int(token_seq_len),), dtype=np.int64)
+    for idx, token in enumerate(tokens[:token_seq_len]):
+        token_ids[idx] = _hash_to_bucket(str(token), int(token_buckets))
 
     numeric = np.zeros((int(numeric_dim),), dtype=np.float32)
     base = [
@@ -466,5 +483,4 @@ def _to_float(value: object, default: float) -> float:
         except ValueError:
             return default
     return default
-
 
